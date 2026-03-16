@@ -1,0 +1,191 @@
+<?php
+namespace App\Controllers\Web;
+
+use App\Core\Request;
+use App\Core\Response;
+use App\Core\Database;
+
+class JustificacionWebController extends BaseWebController
+{
+    /**
+     * GET /v1/web/justificaciones
+     * Admin ve todas. Supervisor ve solo de sus instituciones.
+     */
+    public function index(Request $req): void
+    {
+        $rol    = $_REQUEST['auth_user']['rol'] ?? '';
+        $userId = (int) ($_REQUEST['auth_user']['sub'] ?? 0);
+
+        $sql    = "SELECT j.*,
+                          ua.codigo_empleado, ua.nombres, ua.apellido_paterno
+                   FROM justificaciones j
+                   LEFT JOIN usuarios_app ua ON j.usuario_app_id = ua.id
+                   WHERE 1=1";
+        $params = [];
+
+        // Supervisor filtra por trabajadores de sus sedes
+        if ($rol === 'supervisor') {
+            $sql .= " AND j.usuario_app_id IN (
+                SELECT uas.usuario_app_id FROM usuario_app_sede uas
+                INNER JOIN usuario_web_sede uws ON uws.sede_id = uas.sede_id
+                WHERE uws.usuario_web_id = :uid AND uws.activo = 1
+            )";
+            $params[':uid'] = $userId;
+        }
+
+        if ($req->query('estado'))
+            { $sql .= ' AND j.estado = :estado'; $params[':estado'] = $req->query('estado'); }
+        if ($req->query('usuario_app_id'))
+            { $sql .= ' AND j.usuario_app_id = :uid2'; $params[':uid2'] = $req->query('usuario_app_id'); }
+
+        $sql .= ' ORDER BY j.created_at DESC';
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        Response::success($stmt->fetchAll());
+    }
+
+    /**
+     * POST /v1/web/justificaciones/{id}/aprobar
+     * Al aprobar → actualiza asistencias del período a 'PRESENTE'
+     *
+     * FIX Bug #11: Los dos UPDATEs (justificaciones + asistencias) no estaban en
+     * transacción. Si el segundo fallaba, la justificación quedaba APROBADA pero
+     * las asistencias no se actualizaban → inconsistencia de estado.
+     */
+    public function aprobar(Request $req): void
+    {
+        $id   = (int) $req->param('id');
+        $obs  = (string) $req->input('observaciones', '');
+        $userId = (int) ($_REQUEST['auth_user']['sub'] ?? 0);
+
+        $stmt = $this->db->prepare("SELECT * FROM justificaciones WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $just = $stmt->fetch();
+
+        if (!$just) Response::notFound('Justificación no encontrada');
+        if ($just['estado'] !== 'PENDIENTE')
+            Response::error('Solo se pueden aprobar justificaciones pendientes', 400);
+
+        $this->db->beginTransaction();
+        try {
+            // Aprobar justificación
+            $stmt = $this->db->prepare("
+                UPDATE justificaciones
+                SET estado = 'APROBADO', usuario_web_id = :uid,
+                    motivo = CONCAT(motivo, IF(:obs != '', CONCAT(' [Aprobada: ', :obs2, ']'), '')),
+                    fecha_revision = NOW()
+                WHERE id = :id
+            ");
+            $stmt->execute([':uid' => $userId, ':obs' => $obs, ':obs2' => $obs, ':id' => $id]);
+
+            // Actualizar asistencias del período a JUSTIFICADO
+            $stmt = $this->db->prepare("
+                UPDATE asistencias
+                SET estado_diario = 'JUSTIFICADO',
+                    observacion   = :obs2
+                WHERE usuario_app_id = :uaid
+                  AND fecha BETWEEN :fi AND :ff
+            ");
+            $stmt->execute([
+                ':obs2' => 'Justificación Aprobada' . ($obs ? ': ' . $obs : ''),
+                ':uaid' => $just['usuario_app_id'],
+                ':fi'   => $just['fecha_inicio'],
+                ':ff'   => $just['fecha_fin'],
+            ]);
+
+            $this->db->commit();
+        } catch (\Exception $e) {
+            $this->db->rollBack();
+            error_log('[JustificacionWebController::aprobar] Error: ' . $e->getMessage());
+            Response::error('Error al aprobar la justificación. Intente nuevamente.', 500);
+        }
+
+        Response::success(null, 'Justificación aprobada correctamente');
+    }
+
+    /**
+     * POST /v1/web/justificaciones/{id}/rechazar
+     * Al rechazar → asistencias del período quedan como 'FALTA'
+     *
+     * FIX Bug #11: Misma corrección que aprobar(). Transacción para garantizar
+     * consistencia entre justificaciones y asistencias.
+     */
+    public function rechazar(Request $req): void
+    {
+        $id   = (int) $req->param('id');
+        $obs  = (string) $req->input('observaciones', '');
+        $userId = (int) ($_REQUEST['auth_user']['sub'] ?? 0);
+
+        if (empty($obs)) Response::unprocessable('Las observaciones son requeridas al rechazar');
+
+        $stmt = $this->db->prepare("SELECT * FROM justificaciones WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $just = $stmt->fetch();
+
+        if (!$just) Response::notFound('Justificación no encontrada');
+        if ($just['estado'] !== 'PENDIENTE')
+            Response::error('Solo se pueden rechazar justificaciones pendientes', 400);
+
+        $this->db->beginTransaction();
+        try {
+            $stmt = $this->db->prepare("
+                UPDATE justificaciones
+                SET estado = 'RECHAZADO', usuario_web_id = :uid,
+                    motivo = CONCAT(motivo, IF(:obs != '', CONCAT(' [Rechazada: ', :obs2, ']'), '')),
+                    fecha_revision = NOW()
+                WHERE id = :id
+            ");
+            $stmt->execute([':uid' => $userId, ':obs' => $obs, ':obs2' => $obs, ':id' => $id]);
+
+            // Revertir asistencias a FALTA
+            $stmt = $this->db->prepare("
+                UPDATE asistencias
+                SET estado_diario = 'FALTA', observacion = :obs2
+                WHERE usuario_app_id = :uaid
+                  AND fecha BETWEEN :fi AND :ff
+            ");
+            $stmt->execute([
+                ':obs2' => 'Justificación rechazada' . ($obs ? ': ' . $obs : ''),
+                ':uaid' => $just['usuario_app_id'],
+                ':fi'   => $just['fecha_inicio'],
+                ':ff'   => $just['fecha_fin'],
+            ]);
+
+            $this->db->commit();
+        } catch (\Exception $e) {
+            $this->db->rollBack();
+            error_log('[JustificacionWebController::rechazar] Error: ' . $e->getMessage());
+            Response::error('Error al rechazar la justificación. Intente nuevamente.', 500);
+        }
+
+        Response::success(null, 'Justificación rechazada');
+    }
+
+    /** GET /v1/web/justificaciones/{id} */
+    public function show(Request $req): void
+    {
+        $id   = (int) $req->param('id');
+        $stmt = $this->db->prepare("SELECT * FROM justificaciones WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $just = $stmt->fetch();
+        if (!$just) Response::notFound('Justificación no encontrada');
+        Response::success($just);
+    }
+
+    /** DELETE /v1/web/justificaciones/{id} */
+    public function destroy(Request $req): void
+    {
+        $id   = (int) $req->param('id');
+        $stmt = $this->db->prepare("SELECT estado FROM justificaciones WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $just = $stmt->fetch();
+
+        if (!$just) Response::notFound('Justificación no encontrada');
+        if ($just['estado'] !== 'PENDIENTE')
+            Response::error('Solo se pueden eliminar justificaciones pendientes', 400);
+
+        $stmt = $this->db->prepare("DELETE FROM justificaciones WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        Response::success(null, 'Justificación eliminada correctamente');
+    }
+}
