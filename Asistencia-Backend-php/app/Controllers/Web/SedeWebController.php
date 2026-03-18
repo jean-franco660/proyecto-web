@@ -30,6 +30,11 @@ class SedeWebController extends BaseWebController
         $where = 'WHERE deleted_at IS NULL';
         $params = [];
 
+        if ($this->rol() === 'supervisor') {
+            $where .= " AND id IN (SELECT sede_id FROM usuario_web_sede WHERE usuario_web_id = :uid AND activo = 1)";
+            $params[':uid'] = $this->userId();
+        }
+
         if ($search) {
             $where .= ' AND (nombre LIKE :s OR codigo_sede LIKE :s2)';
             $params[':s']  = "%$search%";

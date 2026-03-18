@@ -19,6 +19,11 @@ class UsuarioAppController extends BaseWebController
         $whereClause = "1=1";
         $params = [];
 
+        if ($this->rol() === 'supervisor') {
+            $whereClause .= " AND EXISTS (SELECT 1 FROM usuario_app_sede uas WHERE uas.usuario_app_id = u.id AND uas.sede_id IN (SELECT sede_id FROM usuario_web_sede WHERE usuario_web_id = :uid AND activo = 1) AND uas.estado = 'ACTIVO')";
+            $params[':uid'] = $this->userId();
+        }
+
         if ($sedeId) {
             $whereClause .= " AND EXISTS (SELECT 1 FROM usuario_app_sede uas WHERE uas.usuario_app_id = u.id AND uas.sede_id = :sid AND uas.estado = 'ACTIVO')";
             $params[':sid'] = (int) $sedeId;
@@ -110,6 +115,14 @@ class UsuarioAppController extends BaseWebController
         $stmt->execute([':id' => $id]);
         $u = $stmt->fetch(\PDO::FETCH_ASSOC);
         if (!$u) Response::notFound('Trabajador no encontrado');
+
+        if ($this->rol() === 'supervisor') {
+            $stmtChk = $this->db->prepare("SELECT 1 FROM usuario_app_sede uas WHERE uas.usuario_app_id = ? AND uas.sede_id IN (SELECT sede_id FROM usuario_web_sede WHERE usuario_web_id = ? AND activo = 1) AND uas.estado = 'ACTIVO'");
+            $stmtChk->execute([$id, $this->userId()]);
+            if (!$stmtChk->fetch()) {
+                Response::error('Sin acceso a este trabajador', 403);
+            }
+        }
         
         $stmtSedes = $this->db->prepare("
             SELECT s.id, s.nombre, s.codigo_sede AS codigo_modular_ie, uas.cargo, uas.estado, uas.fecha_inicio, uas.fecha_fin, uas.id AS pivot_id
@@ -159,6 +172,20 @@ class UsuarioAppController extends BaseWebController
         $stmt = $this->db->prepare("SELECT id FROM usuarios_app WHERE email = ? OR codigo_empleado = ?");
         $stmt->execute([$email, $codigo]);
         if ($stmt->fetch(\PDO::FETCH_ASSOC)) Response::error('El email o código modular ya existe', 422);
+
+        $asignaciones = $req->input('asignaciones', []);
+        if ($this->rol() === 'supervisor' && is_array($asignaciones)) {
+            foreach ($asignaciones as $asig) {
+                if (empty($asig['institucion_id']) || !is_numeric($asig['institucion_id'])) {
+                    Response::unprocessable('institucion_id inválido en asignaciones');
+                }
+                $stmtChk = $this->db->prepare("SELECT 1 FROM usuario_web_sede WHERE usuario_web_id = ? AND sede_id = ? AND activo = 1");
+                $stmtChk->execute([$this->userId(), (int)$asig['institucion_id']]);
+                if (!$stmtChk->fetch()) {
+                    Response::error('No tienes permiso para asignar trabajadores a esta sede', 403);
+                }
+            }
+        }
 
         $this->db->beginTransaction();
         try {
@@ -215,6 +242,14 @@ class UsuarioAppController extends BaseWebController
         $stmt->execute([$id]);
         if (!$stmt->fetch(\PDO::FETCH_ASSOC)) Response::notFound('Trabajador no encontrado');
 
+        if ($this->rol() === 'supervisor') {
+            $stmtChk = $this->db->prepare("SELECT 1 FROM usuario_app_sede uas WHERE uas.usuario_app_id = ? AND uas.sede_id IN (SELECT sede_id FROM usuario_web_sede WHERE usuario_web_id = ? AND activo = 1) AND uas.estado = 'ACTIVO'");
+            $stmtChk->execute([$id, $this->userId()]);
+            if (!$stmtChk->fetch()) {
+                Response::error('Sin acceso a este trabajador', 403);
+            }
+        }
+
         $campos = [];
         $params = [];
         
@@ -246,15 +281,23 @@ class UsuarioAppController extends BaseWebController
 
             $asignaciones = $req->input('asignaciones');
             if (is_array($asignaciones)) {
-                $this->db->prepare("DELETE FROM usuario_app_sede WHERE usuario_app_id = ?")->execute([$id]);
-                $stmtAsig = $this->db->prepare("
-                    INSERT INTO usuario_app_sede (usuario_app_id, sede_id, cargo, estado, fecha_inicio, fecha_fin)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ");
+                if ($this->rol() === 'supervisor') {
+                    foreach ($asignaciones as $asig) {
+                        if (empty($asig['institucion_id']) || !is_numeric($asig['institucion_id'])) {
+                            Response::unprocessable('institucion_id inválido en asignaciones');
+                        }
+                        $stmtChk = $this->db->prepare("SELECT 1 FROM usuario_web_sede WHERE usuario_web_id = ? AND sede_id = ? AND activo = 1");
+                        $stmtChk->execute([$this->userId(), (int)$asig['institucion_id']]);
+                        if (!$stmtChk->fetch()) {
+                            Response::error('No tienes permiso para asignar trabajadores a esta sede', 403);
+                        }
+                    }
+                }
+                $stmtAsig = $this->db->prepare("INSERT INTO usuario_app_sede (usuario_app_id, sede_id, cargo, estado, fecha_inicio, fecha_fin) VALUES (?, ?, ?, ?, ?, ?)");
                 foreach ($asignaciones as $asig) {
                     $stmtAsig->execute([
                         $id,
-                        $asig['institucion_id'],
+                        (int)$asig['institucion_id'],
                         $asig['cargo'] ?? 'DOCENTE',
                         $asig['estado'] ?? 'ACTIVO',
                         $asig['fecha_inicio'] ?? date('Y-m-d'),

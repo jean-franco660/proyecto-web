@@ -19,9 +19,15 @@ class UsuarioWebController extends BaseWebController
     {
         $this->soloAdministrador();
         $stmt = $this->db->query("
-            SELECT id, nombre, email, rol, estado, created_at
-            FROM usuarios_web
-            ORDER BY rol, nombre
+            SELECT u.id, u.nombre, u.email, u.rol, u.estado, u.created_at,
+                   (SELECT s.nombre
+                    FROM usuario_web_sede us
+                    JOIN sedes s ON us.sede_id = s.id
+                    WHERE us.usuario_web_id = u.id AND us.activo = 1
+                    ORDER BY us.fecha_inicio DESC
+                    LIMIT 1) AS sede
+            FROM usuarios_web u
+            ORDER BY u.rol, u.nombre
         ");
         Response::success($stmt->fetchAll());
     }
@@ -59,8 +65,26 @@ class UsuarioWebController extends BaseWebController
         $stmt->execute([$email]);
         if ($stmt->fetch()) Response::error('El email ya está registrado', 422);
 
-        // El administrador inicia ACTIVO; supervisores inician INACTIVO (el admin los activa)
-        $estado = $rol === 'administrador' ? 'ACTIVO' : 'INACTIVO';
+        $estado = strtoupper(trim((string) $req->input('estado')));
+        if (!$estado) {
+            // El administrador inicia ACTIVO; supervisores inician INACTIVO (el admin los activa)
+            $estado = $rol === 'administrador' ? 'ACTIVO' : 'INACTIVO';
+        }
+        if (!in_array($estado, ['ACTIVO', 'INACTIVO'])) {
+            Response::unprocessable('Estado inválido');
+        }
+
+        $sedeId = $req->input('sede_id');
+        if ($rol === 'supervisor') {
+            if (!$sedeId || !is_numeric($sedeId)) {
+                Response::unprocessable('sede_id es requerido para supervisor');
+            }
+            $stmtSede = $this->db->prepare('SELECT id FROM sedes WHERE id = ? AND deleted_at IS NULL');
+            $stmtSede->execute([(int)$sedeId]);
+            if (!$stmtSede->fetch()) {
+                Response::unprocessable('Sede no válida');
+            }
+        }
 
         $stmt = $this->db->prepare("
             INSERT INTO usuarios_web (nombre, email, password, rol, estado)
@@ -74,7 +98,12 @@ class UsuarioWebController extends BaseWebController
             ':estado' => $estado,
         ]);
 
-        Response::success(['id' => $this->db->lastInsertId()], 'Usuario web creado correctamente', 201);
+        $nuevoId = (int) $this->db->lastInsertId();
+        if ($rol === 'supervisor') {
+            $this->db->prepare("INSERT INTO usuario_web_sede (usuario_web_id, sede_id, activo, fecha_inicio) VALUES (?, ?, 1, CURDATE())")->execute([$nuevoId, (int)$sedeId]);
+        }
+
+        Response::success(['id' => $nuevoId], 'Usuario web creado correctamente', 201);
     }
 
     /** PUT /v1/web/usuarios-web/{id} — actualizar nombre, email o rol */
@@ -85,16 +114,55 @@ class UsuarioWebController extends BaseWebController
 
         $campos = [];
         $params = [];
-        foreach (['nombre', 'email', 'rol'] as $campo) {
+        foreach (['nombre', 'email', 'rol', 'estado', 'password'] as $campo) {
             if ($req->input($campo) !== null) {
-                $campos[] = "`{$campo}` = ?";
-                $params[] = $req->input($campo);
+                if ($campo === 'estado') {
+                    $estado = strtoupper(trim((string) $req->input('estado')));
+                    if (!in_array($estado, ['ACTIVO', 'INACTIVO'])) {
+                        Response::unprocessable('Estado inválido');
+                    }
+                    $campos[] = "`estado` = ?";
+                    $params[] = $estado;
+                } elseif ($campo === 'password') {
+                    if ($req->input('password') !== '') {
+                        $campos[] = "`password` = ?";
+                        $params[] = password_hash($req->input('password'), PASSWORD_BCRYPT);
+                    }
+                } else {
+                    $campos[] = "`{$campo}` = ?";
+                    $params[] = $req->input($campo);
+                }
             }
         }
         if (empty($campos)) Response::unprocessable('No hay campos a actualizar');
 
         $params[] = $id;
         $this->db->prepare("UPDATE usuarios_web SET " . implode(', ', $campos) . " WHERE id = ?")->execute($params);
+
+        $sedeId = $req->input('sede_id');
+        if ($sedeId !== null) {
+            if (!is_numeric($sedeId)) {
+                Response::unprocessable('sede_id inválido');
+            }
+
+            $stmtRole = $this->db->prepare('SELECT rol FROM usuarios_web WHERE id = ?');
+            $stmtRole->execute([$id]);
+            $currentRole = $stmtRole->fetchColumn();
+            if ($req->input('rol') !== null) {
+                $currentRole = $req->input('rol');
+            }
+            if ($currentRole !== 'supervisor') {
+                Response::unprocessable('Solo supervisor puede tener sede asignada');
+            }
+            $stmtSede = $this->db->prepare('SELECT id FROM sedes WHERE id = ? AND deleted_at IS NULL');
+            $stmtSede->execute([(int)$sedeId]);
+            if (!$stmtSede->fetch()) {
+                Response::unprocessable('Sede no válida');
+            }
+            $this->db->prepare('UPDATE usuario_web_sede SET activo = 0 WHERE usuario_web_id = ?')->execute([$id]);
+            $this->db->prepare('INSERT INTO usuario_web_sede (usuario_web_id, sede_id, activo, fecha_inicio) VALUES (?, ?, 1, CURDATE())')->execute([$id, (int)$sedeId]);
+        }
+
         Response::success(null, 'Usuario web actualizado correctamente');
     }
 
@@ -103,7 +171,7 @@ class UsuarioWebController extends BaseWebController
     {
         $this->soloAdministrador();
         $id     = (int) $req->param('id');
-        $estado = (string) $req->input('estado');
+        $estado = strtoupper(trim((string) $req->input('estado')));
 
         if (!in_array($estado, ['ACTIVO', 'INACTIVO']))
             Response::unprocessable('Estado inválido');
