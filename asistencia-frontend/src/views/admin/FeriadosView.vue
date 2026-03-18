@@ -68,6 +68,32 @@
       </div>
     </div>
 
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mt-4">
+      <div class="px-4 py-3 border-b border-slate-200 bg-slate-50 font-semibold">Lista de Feriados</div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-200">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fecha</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Nombre</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Tipo</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sede</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Activo</th>
+            </tr>
+          </thead>
+          <tbody class="bg-white divide-y divide-slate-200">
+            <tr v-for="f in feriados" :key="f.id" class="hover:bg-slate-50">
+              <td class="px-3 py-2 text-sm text-slate-700">{{ f.fecha }}</td>
+              <td class="px-3 py-2 text-sm text-slate-700">{{ f.nombre || f.motivo }}</td>
+              <td class="px-3 py-2 text-sm text-slate-700">{{ f.tipo }}</td>
+              <td class="px-3 py-2 text-sm text-slate-700">{{ getSedeName(f.sede_id) }}</td>
+              <td class="px-3 py-2 text-sm font-semibold" :class="f.activo == 1 ? 'text-emerald-600' : 'text-rose-600'">{{ f.activo == 1 ? 'Sí' : 'No' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Modal Form -->
     <div v-if="isModalOpen" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
@@ -91,8 +117,11 @@
           </div>
           <!-- TODO: Select for Sede if EMPRESA is selected -->
           <div v-if="form.tipo === 'EMPRESA'">
-            <label class="block text-sm font-medium text-slate-700 mb-1">ID de Sede (Opcional)</label>
-            <input v-model="form.sede_id" type="number" class="input-field" placeholder="ID de la sede">
+            <label class="block text-sm font-medium text-slate-700 mb-1">Sede (Opcional)</label>
+            <select v-model="form.sede_id" class="input-field">
+              <option value="">Sin sede</option>
+              <option v-for="s in sedes" :key="s.id" :value="s.id">{{ s.nombre }}</option>
+            </select>
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1">Estado</label>
@@ -123,6 +152,7 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import api from '@/api/axios'
 
 const feriados = ref([])
+const sedes = ref([])
 const loading = ref(true)
 const error = ref(null)
 
@@ -147,10 +177,14 @@ const fetchFeriados = async () => {
   loading.value = true
   error.value = null
   try {
-    const response = await api.get('/v1/web/feriados')
-    feriados.value = response.data.data || response.data
+    const [resFeriados, resSedes] = await Promise.all([
+      api.get('/v1/web/feriados'),
+      api.get('/v1/web/sedes')
+    ])
+    feriados.value = resFeriados.data.data || resFeriados.data
+    sedes.value = resSedes.data.data || resSedes.data
   } catch (err) {
-    error.value = 'Error al obtener feriados'
+    error.value = 'Error al obtener feriados o sedes'
   } finally {
     loading.value = false
   }
@@ -201,6 +235,12 @@ const changeMonth = (step) => {
 
 const getFeriadosForDate = (dateStr) => {
   return feriados.value.filter(f => f.fecha === dateStr && (f.activo === 1 || f.estado === 'activo' || f.activo === true))
+}
+
+const getSedeName = (sedeId) => {
+  if (!sedeId) return 'N/A'
+  const s = sedes.value.find(x => x.id === sedeId)
+  return s ? s.nombre : 'N/A'
 }
 
 const openModalForDate = (dateStr) => {

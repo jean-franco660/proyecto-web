@@ -23,42 +23,50 @@ const router = createRouter({
         {
           path: 'sedes',
           name: 'sedes',
-          component: () => import('@/views/admin/SedesView.vue')
+          component: () => import('@/views/admin/SedesView.vue'),
+          meta: { roles: ['administrador', 'supervisor'] }
         },
         {
           path: 'horarios',
           name: 'horarios',
-          component: () => import('@/views/admin/HorariosView.vue')
+          component: () => import('@/views/admin/HorariosView.vue'),
+          meta: { roles: ['administrador', 'supervisor'] }
         },
         {
           path: 'feriados',
           name: 'feriados',
-          component: () => import('@/views/admin/FeriadosView.vue')
+          component: () => import('@/views/admin/FeriadosView.vue'),
+          meta: { roles: ['administrador', 'supervisor'] }
         },
         {
           path: 'usuarios-web',
           name: 'usuarios-web',
-          component: () => import('@/views/admin/UsuariosWebView.vue')
+          component: () => import('@/views/admin/UsuariosWebView.vue'),
+          meta: { roles: ['administrador'] }
         },
         {
           path: 'supervisores',
           name: 'supervisores',
-          component: () => import('@/views/admin/SupervisoresView.vue')
+          component: () => import('@/views/admin/SupervisoresView.vue'),
+          meta: { roles: ['administrador'] }
         },
         {
           path: 'usuarios-app',
           name: 'usuarios-app',
-          component: () => import('@/views/admin/UsuariosAppView.vue')
+          component: () => import('@/views/admin/UsuariosAppView.vue'),
+          meta: { roles: ['administrador', 'supervisor'] }
         },
         {
           path: 'asistencias',
           name: 'asistencias',
-          component: () => import('@/views/operaciones/AsistenciasView.vue')
+          component: () => import('@/views/operaciones/AsistenciasView.vue'),
+          meta: { roles: ['administrador', 'supervisor'] }
         },
         {
           path: 'justificaciones',
           name: 'justificaciones',
-          component: () => import('@/views/operaciones/JustificacionesView.vue')
+          component: () => import('@/views/operaciones/JustificacionesView.vue'),
+          meta: { roles: ['administrador', 'supervisor'] }
         }
       ]
     }
@@ -71,11 +79,20 @@ router.beforeEach((to, from, next) => {
 
   if (to.meta.requiresAuth && !isAuthenticated) {
     next({ name: 'login' })
+    return
   } else if (to.meta.requiresGuest && isAuthenticated) {
     next({ name: 'dashboard' })
-  } else {
-    next()
+    return
   }
+
+  const role = authStore.user?.rol
+  const allowedRoles = to.meta.roles
+  if (allowedRoles && role && !allowedRoles.includes(role)) {
+    next({ name: 'dashboard' })
+    return
+  }
+
+  next()
 })
 
 export default router

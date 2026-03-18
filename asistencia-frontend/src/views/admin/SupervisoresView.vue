@@ -19,6 +19,7 @@
           <tr>
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Nombre Completo</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Email</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sede</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Estado</th>
             <th class="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Acciones</th>
           </tr>
@@ -36,8 +37,9 @@
               </div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.email }}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.sede || 'N/A' }}</td>
             <td class="px-6 py-4 whitespace-nowrap">
-               <button @click="toggleEstado(user)" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full focus:outline-none" :class="user.estado === 'activo' ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-red-100 text-red-800 hover:bg-red-200'" title="Click para cambiar estado">
+               <button @click="toggleEstado(user)" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full focus:outline-none" :class="user.estado === 'ACTIVO' ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-red-100 text-red-800 hover:bg-red-200'" title="Click para cambiar estado">
                 {{ user.estado }}
                </button>
             </td>
@@ -70,21 +72,20 @@
              </label>
              <input v-model="form.password" type="password" :required="!isEditing" class="input-field" placeholder="••••••••">
           </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="hidden">
-              <label class="block text-sm font-medium text-slate-700 mb-1">Rol</label>
-              <select v-model="form.rol" class="input-field" disabled>
-                <option value="supervisor">Supervisor</option>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Sede</label>
+              <select v-model="form.sede_id" class="input-field" required>
+                <option value="">Seleccione sede</option>
+                <option v-for="s in sedes" :key="s.id" :value="s.id">{{ s.nombre }}</option>
               </select>
             </div>
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1">Estado</label>
               <select v-model="form.estado" class="input-field">
-                <option value="activo">Activo</option>
-                <option value="inactivo">Inactivo</option>
+                <option value="ACTIVO">Activo</option>
+                <option value="INACTIVO">Inactivo</option>
               </select>
             </div>
-          </div>
           <div class="flex justify-end space-x-3 pt-4 border-t border-slate-100">
             <button type="button" @click="closeModal" class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
             <button type="submit" class="btn-primary" :disabled="saving">
@@ -102,6 +103,7 @@ import { ref, reactive, onMounted } from 'vue'
 import api from '@/api/axios'
 
 const usuarios = ref([])
+const sedes = ref([])
 const loading = ref(true)
 const error = ref(null)
 const isModalOpen = ref(false)
@@ -114,17 +116,22 @@ const form = reactive({
   email: '',
   password: '',
   rol: 'supervisor',
-  estado: 'activo'
+  estado: 'activo',
+  sede_id: null
 })
 
 const fetchUsuarios = async () => {
   loading.value = true
   error.value = null
   try {
-    const response = await api.get('/v1/web/usuarios-web')
-    usuarios.value = response.data.data || response.data
+    const [responseUsuarios, responseSedes] = await Promise.all([
+      api.get('/v1/web/usuarios-web'),
+      api.get('/v1/web/sedes')
+    ])
+    usuarios.value = responseUsuarios.data.data || responseUsuarios.data
+    sedes.value = responseSedes.data.data || responseSedes.data
   } catch (err) {
-    error.value = 'Error al obtener supervisores'
+    error.value = 'Error al obtener supervisores o sedes'
   } finally {
     loading.value = false
   }
@@ -153,8 +160,7 @@ const saveItem = async () => {
     if (isEditing.value && !payload.password) {
       delete payload.password
     }
-    
-    // Forzar rol supervisor siempre por seguridad en el front
+    payload.estado = (payload.estado || 'INACTIVO').toUpperCase()
     payload.rol = 'supervisor'
 
     if (isEditing.value) {
@@ -172,10 +178,10 @@ const saveItem = async () => {
 }
 
 const toggleEstado = async (user) => {
-  const nuevoEstado = user.estado === 'activo' ? 'inactivo' : 'activo'
+  const nuevoEstado = user.estado === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO'
   try {
     await api.patch(`/v1/web/usuarios-web/${user.id}/estado`, { estado: nuevoEstado })
-    user.estado = nuevoEstado 
+    user.estado = nuevoEstado
   } catch (err) {
     alert(err.response?.data?.error || 'Error al cambiar estado')
   }

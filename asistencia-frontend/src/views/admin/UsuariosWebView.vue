@@ -39,8 +39,8 @@
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.email }}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600 capitalize">{{ user.rol }}</td>
             <td class="px-6 py-4 whitespace-nowrap">
-               <button @click="toggleEstado(user)" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full focus:outline-none" :class="user.estado === 'activo' ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-red-100 text-red-800 hover:bg-red-200'" title="Click para cambiar estado">
-                {{ user.estado }}
+               <button @click="toggleEstado(user)" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full focus:outline-none" :class="(user.estado || '').toLowerCase() === 'activo' ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-red-100 text-red-800 hover:bg-red-200'" title="Click para cambiar estado">
+                {{ (user.estado || '').toLowerCase() }}
                </button>
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -137,6 +137,7 @@ const openModal = (item = null) => {
     isEditing.value = true
     Object.assign(form, item)
     form.password = '' // Don't show hashed password, start empty
+    form.estado = (item.estado || '').toLowerCase()
   } else {
     isEditing.value = false
     Object.assign(form, { id: null, nombre: '', email: '', password: '', rol: 'administrador', estado: 'activo' })
@@ -171,7 +172,7 @@ const saveItem = async () => {
 }
 
 const toggleEstado = async (user) => {
-  const nuevoEstado = user.estado === 'activo' ? 'inactivo' : 'activo'
+  const nuevoEstado = (user.estado || '').toLowerCase() === 'activo' ? 'INACTIVO' : 'ACTIVO'
   try {
     await api.patch(`/v1/web/usuarios-web/${user.id}/estado`, { estado: nuevoEstado })
     user.estado = nuevoEstado // Optimistic update

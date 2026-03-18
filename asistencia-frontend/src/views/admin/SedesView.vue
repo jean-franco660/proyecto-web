@@ -71,18 +71,9 @@
             </div>
           </div>
           <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1">Tolerancia (min)</label>
-              <input v-model="form.minutos_tolerancia" type="number" class="input-field" placeholder="0">
-            </div>
              <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1">Radio Geolocalización</label>
-               <select v-model="form.config_radio" class="input-field">
-                 <option value="50">50m</option>
-                 <option value="100">100m</option>
-                 <option value="500">500m</option>
-                 <option value="1000">1km</option>
-               </select>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Radio Geolocalización (m)</label>
+              <input v-model="form.config_radio" type="number" min="1" class="input-field" placeholder="Ej: 100" />
             </div>
           </div>
           <div>

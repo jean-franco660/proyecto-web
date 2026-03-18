@@ -16,15 +16,15 @@
           <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Administración</p>
         </div>
         
-        <router-link to="/usuarios-web" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
+        <router-link to="/usuarios-web" v-if="isAdmin" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
           <span>Admin Sistema</span>
         </router-link>
-        <router-link to="/supervisores" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
+        <router-link to="/supervisores" v-if="isAdmin" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
           <span>Supervisores</span>
         </router-link>
-        <router-link to="/usuarios-app" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
+        <router-link to="/usuarios-app" v-if="isAdmin || isSupervisor" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
           <span>Trabajadores (App)</span>
         </router-link>
@@ -95,6 +95,8 @@ const authStore = useAuthStore()
 
 const userName = computed(() => authStore.user?.nombres || 'Usuario')
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
+const isAdmin = computed(() => authStore.user?.rol === 'administrador')
+const isSupervisor = computed(() => authStore.user?.rol === 'supervisor')
 
 const handleLogout = async () => {
   await authStore.logout()

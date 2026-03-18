@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <div class="flex justify-between items-center pb-4 border-b border-slate-200">
-      <h2 class="text-2xl font-bold text-slate-800">Trabajadores (App Móvil)</h2>
+      <h2 class="text-2xl font-bold text-slate-800">Trabajadores</h2>
       <div class="flex space-x-3">
          <button @click="openModal()" class="btn-primary flex items-center space-x-2">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
@@ -21,8 +21,8 @@
           <thead class="bg-slate-50">
             <tr>
               <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Identidad</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sede</th>
               <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Cargo</th>
-              <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Condición Laboral</th>
               <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Horario</th>
               <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Estado</th>
               <th class="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Acciones</th>
@@ -39,11 +39,11 @@
                   </div>
                 </div>
               </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.cargo || 'No asignado' }}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.condicion_laboral || 'No asignado' }}</td>
-               <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
-                <div v-if="user.horario" class="font-medium text-indigo-600">{{ user.horario.nombre }}</div>
-                <div v-if="user.horario" class="text-xs">{{ user.horario.hora_entrada }} - {{ user.horario.hora_salida }}</div>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.instituciones?.[0]?.nombre || 'No asignado' }}</td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.instituciones?.[0]?.pivot?.cargo || 'No asignado' }}</td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
+                <div v-if="user.instituciones?.[0]" class="font-medium text-indigo-600">{{ user.instituciones[0].pivot?.hora_inicio || '—' }}</div>
+                <div v-if="user.instituciones?.[0]" class="text-xs">{{ user.instituciones[0].pivot?.fecha_inicio || '' }} </div>
                 <span v-else class="text-slate-400 italic">Sin horario</span>
               </td>
               <td class="px-6 py-4 whitespace-nowrap">
@@ -111,7 +111,7 @@
           </div>
           <div v-if="!isEditing || form.password !== undefined">
              <label class="block text-sm font-medium text-slate-700 mb-1">
-                Contraseña App <span v-if="isEditing" class="text-xs text-slate-400 font-normal">(Vacío para no cambiar)</span>
+                Contraseña <span v-if="isEditing" class="text-xs text-slate-400 font-normal">(Vacío para no cambiar)</span>
              </label>
              <input v-model="form.password" type="password" :required="!isEditing" class="input-field" placeholder="••••••••">
           </div>
@@ -124,6 +124,13 @@
               <label class="block text-sm font-medium text-slate-700 mb-1">Condición Laboral</label>
               <input v-model="form.condicion_laboral" type="text" class="input-field" placeholder="CAS, Nombrado, etc.">
             </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Sede asignada</label>
+            <select v-model="form.sede_id" class="input-field" required>
+              <option value="">Seleccione sede</option>
+              <option v-for="s in sedes" :key="s.id" :value="s.id">{{ s.nombre }}</option>
+            </select>
           </div>
           <div class="flex justify-end space-x-3 pt-4 border-t border-slate-100">
             <button type="button" @click="closeModal" class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
@@ -169,6 +176,7 @@ import api from '@/api/axios'
 
 const usuarios = ref([])
 const horariosList = ref([])
+const sedes = ref([])
 const selectedUser = ref(null)
 
 const loading = ref(true)
@@ -195,7 +203,8 @@ const form = reactive({
   password: '',
   estado: 'ACTIVO',
   cargo: '',
-  condicion_laboral: ''
+  condicion_laboral: '',
+  sede_id: null
 })
 
 const horarioForm = reactive({
@@ -207,9 +216,10 @@ const fetchInicial = async (page = 1) => {
   error.value = null
   currentPage.value = page
   try {
-    const [resUsuarios, resHorarios] = await Promise.all([
+    const [resUsuarios, resHorarios, resSedes] = await Promise.all([
        api.get(`/v1/web/usuarios-app?page=${currentPage.value}&per_page=${perPage.value}`),
-       api.get('/v1/web/horarios')
+       api.get('/v1/web/horarios'),
+       api.get('/v1/web/sedes')
     ])
     const result = resUsuarios.data.data || resUsuarios.data;
     if (result.current_page) {
@@ -220,8 +230,8 @@ const fetchInicial = async (page = 1) => {
     } else {
       usuarios.value = result || []
     }
-    horariosList.value = resHorarios.data.data || resHorarios.data
-  } catch (err) {
+    horariosList.value = resHorarios.data.data || resHorarios.data;
+    sedes.value = resSedes.data.data || resSedes.data  } catch (err) {
     error.value = 'Error al obtener registros'
   } finally {
     loading.value = false
@@ -269,9 +279,17 @@ const saveItem = async () => {
     if (isEditing.value && !payload.password) delete payload.password
 
     if (isEditing.value) {
-      await api.put(`/v1/web/usuarios-app/${form.id}`, payload)
+      const updatePayload = {
+        ...payload,
+        asignaciones: form.sede_id ? [{ institucion_id: form.sede_id, cargo: form.cargo || 'DOCENTE', estado: 'ACTIVO' }] : []
+      }
+      await api.put(`/v1/web/usuarios-app/${form.id}`, updatePayload)
     } else {
-      await api.post('/v1/web/usuarios-app', payload)
+      const createPayload = {
+        ...payload,
+        asignaciones: form.sede_id ? [{ institucion_id: form.sede_id, cargo: form.cargo || 'DOCENTE', estado: 'ACTIVO' }] : []
+      }
+      await api.post('/v1/web/usuarios-app', createPayload)
     }
     closeModal()
     fetchInicial()
