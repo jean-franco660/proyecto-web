@@ -10,9 +10,36 @@
       </div>
     </div>
 
-    <!-- Error/Loading Messages -->
-    <div v-if="error" class="bg-red-50 text-red-600 p-4 rounded-lg">{{ error }}</div>
-    <div v-if="loading" class="text-center py-10 text-slate-500">Cargando trabajadores...</div>
+    <!-- Skeleton Loader -->
+    <div v-if="loading" class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+      <div class="min-w-full">
+        <div class="bg-slate-50 px-6 py-3 flex gap-4">
+          <div class="h-3 bg-slate-200 rounded animate-pulse w-32"></div>
+          <div class="h-3 bg-slate-200 rounded animate-pulse w-24"></div>
+          <div class="h-3 bg-slate-200 rounded animate-pulse w-20"></div>
+        </div>
+        <div v-for="i in 5" :key="i" class="px-6 py-4 border-t border-slate-100 flex items-center gap-4 animate-pulse">
+          <div class="flex-1 space-y-2">
+            <div class="h-3 bg-slate-200 rounded w-40"></div>
+            <div class="h-2 bg-slate-100 rounded w-24"></div>
+          </div>
+          <div class="h-3 bg-slate-200 rounded w-28"></div>
+          <div class="h-3 bg-slate-200 rounded w-20"></div>
+          <div class="h-5 bg-slate-200 rounded-full w-14"></div>
+          <div class="h-3 bg-slate-200 rounded w-24"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error State -->
+    <div v-else-if="error" class="bg-red-50 border border-red-200 rounded-xl p-8 text-center">
+      <svg class="w-10 h-10 text-red-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+      </svg>
+      <p class="text-red-700 font-medium mb-1">No se pudo cargar la lista de trabajadores</p>
+      <p class="text-red-500 text-sm mb-4">{{ error }}</p>
+      <button @click="fetchInicial()" class="btn-primary text-sm">Reintentar</button>
+    </div>
 
     <!-- Table -->
     <div v-if="!loading && usuarios.length" class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
@@ -74,7 +101,14 @@
       </div>
     </div>
 
-    <!-- Modal Form (Basic CRUD) -->
+    <!-- Empty State -->
+    <div v-else-if="!usuarios.length" class="bg-white rounded-xl border border-slate-100 p-12 text-center">
+      <svg class="w-12 h-12 text-slate-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+      <p class="text-slate-500 font-medium">No hay trabajadores registrados</p>
+      <p class="text-slate-400 text-sm mt-1">Crea el primero usando el botón "Nuevo Trabajador"</p>
+    </div>
     <div v-if="isModalOpen" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div class="bg-white rounded-2xl p-6 w-full max-w-2xl shadow-xl max-h-[90vh] overflow-y-auto">
         <h3 class="text-lg font-bold text-slate-800 mb-4">{{ isEditing ? 'Editar Trabajador' : 'Nuevo Trabajador' }}</h3>
@@ -151,9 +185,9 @@
         <form @submit.prevent="saveHorarioAssign" class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1">Seleccionar Horario</label>
-            <select v-model="horarioForm.horario_id" class="input-field" required>
+            <select v-model="horarioForm.horario_sede_id" class="input-field" required>
                <option :value="null">Ninguno / Quitar Horario</option>
-               <option v-for="h in horariosList" :key="h.id" :value="h.id">{{ h.nombre }} ({{h.hora_entrada}} - {{h.hora_salida}})</option>
+               <option v-for="h in horariosList" :key="h.id" :value="h.id">{{ h.nombre_turno }} ({{h.hora_entrada}} - {{h.hora_salida}})</option>
             </select>
           </div>
 
@@ -173,6 +207,9 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import api from '@/api/axios'
+import { useToast } from '@/composables/useToast'
+
+const toast = useToast()
 
 const usuarios = ref([])
 const horariosList = ref([])
@@ -208,7 +245,8 @@ const form = reactive({
 })
 
 const horarioForm = reactive({
-  horario_id: null
+  horario_sede_id: null,
+  sede_id: null
 })
 
 const fetchInicial = async (page = 1) => {
@@ -263,7 +301,8 @@ const closeModal = () => {
 
 const openHorarioModal = (user) => {
   selectedUser.value = user
-  horarioForm.horario_id = user.horario_id || null
+  horarioForm.horario_sede_id = null
+  horarioForm.sede_id = user.instituciones?.[0]?.id || null
   isHorarioModalOpen.value = true
 }
 
@@ -294,7 +333,7 @@ const saveItem = async () => {
     closeModal()
     fetchInicial()
   } catch (err) {
-    alert(err.response?.data?.error || 'Error al guardar')
+    toast.error(err.response?.data?.error || err.response?.data?.message || 'Error al guardar')
   } finally {
     saving.value = false
   }
@@ -303,11 +342,20 @@ const saveItem = async () => {
 const saveHorarioAssign = async () => {
   saving.value = true
   try {
-    await api.patch(`/v1/web/usuarios-app/${selectedUser.value.id}/horario`, horarioForm)
+    if (!horarioForm.sede_id) {
+      toast.warning('El trabajador no tiene sede asignada. Edítalo primero.')
+      saving.value = false
+      return
+    }
+    // El backend espera: sede_id y horario_sede_id (puede ser null para quitar horario)
+    await api.patch(`/v1/web/usuarios-app/${selectedUser.value.id}/horario`, {
+      sede_id: horarioForm.sede_id,
+      horario_sede_id: horarioForm.horario_sede_id
+    })
     closeHorarioModal()
     fetchInicial()
   } catch (err) {
-    alert(err.response?.data?.error || 'Error al asignar horario')
+    toast.error(err.response?.data?.error || 'Error al asignar horario')
   } finally {
     saving.value = false
   }
@@ -319,7 +367,7 @@ const toggleEstado = async (user) => {
     await api.patch(`/v1/web/usuarios-app/${user.id}/estado`, { estado: nuevoEstado })
     user.estado = nuevoEstado
   } catch (err) {
-    alert(err.response?.data?.error || 'Error al cambiar estado')
+    toast.error(err.response?.data?.error || 'Error al cambiar estado')
   }
 }
 
@@ -329,7 +377,7 @@ const deleteItem = async (id) => {
     await api.delete(`/v1/web/usuarios-app/${id}`)
     fetchInicial()
   } catch (err) {
-    alert(err.response?.data?.error || 'Error al eliminar')
+    toast.error(err.response?.data?.error || 'Error al eliminar')
   }
 }
 

@@ -67,6 +67,18 @@ const router = createRouter({
           name: 'justificaciones',
           component: () => import('@/views/operaciones/JustificacionesView.vue'),
           meta: { roles: ['administrador', 'supervisor'] }
+        },
+        {
+          path: 'solicitudes-ausencia',
+          name: 'solicitudes-ausencia',
+          component: () => import('@/views/operaciones/SolicitudesAusenciaView.vue'),
+          meta: { roles: ['administrador', 'supervisor'] }
+        },
+        {
+          path: 'departamentos',
+          name: 'departamentos',
+          component: () => import('@/views/admin/DepartamentosView.vue'),
+          meta: { roles: ['administrador', 'supervisor'] }
         }
       ]
     }

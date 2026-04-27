@@ -37,7 +37,7 @@
               </div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.email }}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.sede || 'N/A' }}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.sede || 'Sin sede' }}</td>
             <td class="px-6 py-4 whitespace-nowrap">
                <button @click="toggleEstado(user)" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full focus:outline-none" :class="user.estado === 'ACTIVO' ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-red-100 text-red-800 hover:bg-red-200'" title="Click para cambiar estado">
                 {{ user.estado }}
@@ -82,8 +82,8 @@
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1">Estado</label>
               <select v-model="form.estado" class="input-field">
+                <option value="INACTIVO">Inactivo (el admin lo activa)</option>
                 <option value="ACTIVO">Activo</option>
-                <option value="INACTIVO">Inactivo</option>
               </select>
             </div>
           <div class="flex justify-end space-x-3 pt-4 border-t border-slate-100">
@@ -116,7 +116,7 @@ const form = reactive({
   email: '',
   password: '',
   rol: 'supervisor',
-  estado: 'activo',
+  estado: 'INACTIVO',
   sede_id: null
 })
 
@@ -141,10 +141,10 @@ const openModal = (item = null) => {
   if (item) {
     isEditing.value = true
     Object.assign(form, item)
-    form.password = '' 
+    form.password = ''
   } else {
     isEditing.value = false
-    Object.assign(form, { id: null, nombre: '', email: '', password: '', rol: 'supervisor', estado: 'activo' })
+    Object.assign(form, { id: null, nombre: '', email: '', password: '', rol: 'supervisor', estado: 'INACTIVO', sede_id: null })
   }
   isModalOpen.value = true
 }
@@ -162,6 +162,12 @@ const saveItem = async () => {
     }
     payload.estado = (payload.estado || 'INACTIVO').toUpperCase()
     payload.rol = 'supervisor'
+    // Asegurar que sede_id se envíe al crear
+    if (!isEditing.value && !payload.sede_id) {
+      alert('Debe seleccionar una sede para el supervisor')
+      saving.value = false
+      return
+    }
 
     if (isEditing.value) {
       await api.put(`/v1/web/usuarios-web/${form.id}`, payload)

@@ -25,20 +25,14 @@ if (file_exists($envFile)) {
     }
 }
 
-// Cabeceras CORS y JSON
+// Headers de seguridad HTTP
 header('Content-Type: application/json; charset=UTF-8');
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Referrer-Policy: strict-origin-when-cross-origin');
 
-$origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '*';
-header("Access-Control-Allow-Origin: {$origin}");
-header('Access-Control-Allow-Credentials: true');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-
-// Manejar preflight
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
+// CORS centralizado (lee ALLOWED_ORIGINS del .env)
+App\Middleware\CorsMiddleware::handle();
 
 // Cargar rutas
 $router = new App\Core\Router();
@@ -46,4 +40,4 @@ require BASE_PATH . '/routes/api.php';
 
 // Despachar la petición
 $request = new App\Core\Request();
-$router->dispatch($request);
+$router->dispatch($request);

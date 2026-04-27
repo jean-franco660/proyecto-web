@@ -33,12 +33,12 @@
     </div>
 
     <!-- Stats Grid -->
-    <div v-if="stats && !loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div v-if="stats" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
       <!-- Total Trabajadores -->
       <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group hover:border-blue-100 transition-colors">
         <div class="absolute -right-4 -top-4 w-24 h-24 bg-blue-50 rounded-full group-hover:scale-110 transition-transform duration-500"></div>
         <div class="relative z-10">
-          <p class="text-sm font-medium text-slate-500 mb-1">Total Trabajadores (App)</p>
+          <p class="text-sm font-medium text-slate-500 mb-1">Trabajadores Activos</p>
           <div class="flex items-end justify-between">
             <h3 class="text-3xl font-bold text-slate-800">{{ stats.usuariosApp ?? 0 }}</h3>
             <div class="p-2 bg-blue-100 text-blue-600 rounded-lg">
@@ -59,9 +59,10 @@
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
             </div>
           </div>
+          <p class="text-xs text-slate-400 mt-1">{{ stats.presentes ?? 0 }} puntual · {{ stats.tardanzas ?? 0 }} tardanza</p>
         </div>
       </div>
-      
+
       <!-- Sedes Activas -->
       <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group hover:border-purple-100 transition-colors">
         <div class="absolute -right-4 -top-4 w-24 h-24 bg-purple-50 rounded-full group-hover:scale-110 transition-transform duration-500"></div>
@@ -90,6 +91,72 @@
         </div>
       </div>
     </div>
+
+    <!-- Resumen de hoy -->
+    <div v-if="stats" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+        <h3 class="text-base font-semibold text-slate-700 mb-4">Resumen del Día — {{ stats.fecha }}</h3>
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-green-500"></span>
+              <span class="text-sm text-slate-600">Presentes</span>
+            </div>
+            <span class="text-sm font-semibold text-slate-800">{{ stats.presentes ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-orange-400"></span>
+              <span class="text-sm text-slate-600">Tardanzas</span>
+            </div>
+            <span class="text-sm font-semibold text-slate-800">{{ stats.tardanzas ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+              <span class="text-sm text-slate-600">Faltas</span>
+            </div>
+            <span class="text-sm font-semibold text-slate-800">{{ stats.faltas ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-blue-400"></span>
+              <span class="text-sm text-slate-600">Justificados</span>
+            </div>
+            <span class="text-sm font-semibold text-slate-800">{{ stats.justificados ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between border-t border-slate-100 pt-2">
+            <div class="flex items-center space-x-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+              <span class="text-sm text-slate-500">Marcaciones observadas pendientes</span>
+            </div>
+            <span class="text-sm font-semibold text-amber-600">{{ stats.observadas_pendientes ?? 0 }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 flex flex-col justify-between">
+        <h3 class="text-base font-semibold text-slate-700 mb-4">Accesos Rápidos</h3>
+        <div class="grid grid-cols-2 gap-3">
+          <router-link to="/asistencias" class="flex items-center space-x-2 p-3 bg-slate-50 hover:bg-indigo-50 rounded-xl transition-colors group">
+            <svg class="w-5 h-5 text-slate-400 group-hover:text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            <span class="text-sm text-slate-600 group-hover:text-indigo-700 font-medium">Asistencias</span>
+          </router-link>
+          <router-link to="/justificaciones" class="flex items-center space-x-2 p-3 bg-slate-50 hover:bg-amber-50 rounded-xl transition-colors group">
+            <svg class="w-5 h-5 text-slate-400 group-hover:text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <span class="text-sm text-slate-600 group-hover:text-amber-700 font-medium">Justificaciones</span>
+          </router-link>
+          <router-link to="/usuarios-app" class="flex items-center space-x-2 p-3 bg-slate-50 hover:bg-blue-50 rounded-xl transition-colors group">
+            <svg class="w-5 h-5 text-slate-400 group-hover:text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+            <span class="text-sm text-slate-600 group-hover:text-blue-700 font-medium">Trabajadores</span>
+          </router-link>
+          <router-link to="/feriados" class="flex items-center space-x-2 p-3 bg-slate-50 hover:bg-green-50 rounded-xl transition-colors group">
+            <svg class="w-5 h-5 text-slate-400 group-hover:text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+            <span class="text-sm text-slate-600 group-hover:text-green-700 font-medium">Feriados</span>
+          </router-link>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -106,13 +173,12 @@ const loadStats = async () => {
   error.value = null
   try {
     const response = await api.get('/v1/web/stats')
-    // Ajustar esto según el formato exacto de respuesta del backend
+    // El backend devuelve: usuariosApp, sedes, asistenciasHoy, presentes, tardanzas,
+    // faltas, justificados, justificacionesPendientes, observadas_pendientes, fecha
     stats.value = response.data.data || response.data
   } catch (err) {
     console.error('Error cargando stats', err)
-    error.value = 'No se pudieron cargar las estadísticas. Revisa la conexión.'
-     // Mock data if backend connection fails for visualization
-    stats.value = { usuariosApp: 42, asistenciasHoy: 38, sedes: 5, justificacionesPendientes: 3 }
+    error.value = 'No se pudieron cargar las estadísticas. Verifica la conexión con el servidor.'
   } finally {
     loading.value = false
   }

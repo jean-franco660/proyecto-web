@@ -1,7 +1,12 @@
 <template>
   <div class="min-h-screen bg-slate-50 flex">
+    <!-- Sidebar Overlay (móvil) -->
+    <div v-if="sidebarOpen" @click="sidebarOpen = false"
+      class="fixed inset-0 bg-slate-900/40 z-20 md:hidden"></div>
+
     <!-- Sidebar -->
-    <aside class="w-64 bg-slate-900 text-white flex flex-col hidden md:flex">
+    <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+      class="fixed md:static w-64 bg-slate-900 text-white flex flex-col z-30 h-full min-h-screen transition-transform duration-300 md:translate-x-0">
       <div class="h-16 flex items-center justify-center border-b border-slate-800">
         <h1 class="text-xl font-bold tracking-wider text-primary-400">PANEL WEB</h1>
       </div>
@@ -40,6 +45,10 @@
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
           <span>Feriados</span>
         </router-link>
+        <router-link to="/departamentos" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+          <span>Departamentos</span>
+        </router-link>
         
         <div class="pt-4 pb-2">
           <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Operaciones</p>
@@ -53,8 +62,30 @@
            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
           <span>Justificaciones</span>
         </router-link>
+        <router-link to="/solicitudes-ausencia" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+          <span>Solicitudes Ausencia</span>
+        </router-link>
       </nav>
       
+      <!-- Badge de rol del usuario -->
+      <div class="px-4 pb-3">
+        <div class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-slate-800/60">
+          <div class="w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+            {{ userInitial }}
+          </div>
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-white truncate">{{ userName }}</p>
+            <span
+              class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full tracking-wide mt-0.5"
+              :class="isAdmin ? 'bg-primary-600/40 text-primary-300' : 'bg-slate-600/60 text-slate-300'"
+            >
+              {{ isAdmin ? 'Administrador' : 'Supervisor' }}
+            </span>
+          </div>
+        </div>
+      </div>
+
       <div class="p-4 border-t border-slate-800">
         <button @click="handleLogout" class="flex items-center space-x-3 px-3 py-2 w-full rounded-lg hover:bg-red-500/10 text-slate-300 hover:text-red-500 transition-colors">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
@@ -66,7 +97,7 @@
     <!-- Main Content -->
     <div class="flex-1 flex flex-col min-w-0">
       <header class="h-16 bg-white shadow-sm flex items-center justify-between px-6 z-10">
-        <button class="md:hidden text-slate-500 hover:text-slate-700">
+        <button @click="sidebarOpen = !sidebarOpen" class="md:hidden text-slate-500 hover:text-slate-700">
            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
         </button>
         <div class="flex-1"></div>
@@ -86,12 +117,13 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const sidebarOpen = ref(false)
 
 const userName = computed(() => authStore.user?.nombres || 'Usuario')
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())

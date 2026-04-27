@@ -18,10 +18,9 @@ export const useAuthStore = defineStore('auth', {
       this.error = null
       try {
         const response = await api.post('/v1/web/login', credentials)
-        
-        // Asume estructura { token: '...', usuario: {...} } y lo alinea
-        // a la variable local `user` de auth
-        const { token, usuario: user } = response.data.data !== undefined ? response.data.data : response.data
+
+        // El backend siempre devuelve { success: true, data: { token, usuario } }
+        const { token, usuario: user } = response.data.data
         
         this.token = token
         this.user = user
@@ -40,7 +39,9 @@ export const useAuthStore = defineStore('auth', {
       try {
         await api.post('/v1/web/logout')
       } catch (err) {
-        console.error('Logout request falló', err)
+        if (err.response?.status !== 401) {
+          console.error('Logout request falló', err)
+        }
       } finally {
         this.token = null
         this.user = null

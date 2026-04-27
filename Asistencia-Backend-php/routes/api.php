@@ -5,6 +5,7 @@ use App\Controllers\App\AsistenciaAppController;
 use App\Controllers\App\SedeAppController;
 use App\Controllers\App\JustificacionAppController;
 use App\Controllers\App\HorarioAppController;
+use App\Controllers\App\SolicitudAusenciaAppController;
 
 use App\Controllers\Web\AuthWebController;
 use App\Controllers\Web\UsuarioWebController;
@@ -15,6 +16,8 @@ use App\Controllers\Web\AsistenciaWebController;
 use App\Controllers\Web\JustificacionWebController;
 use App\Controllers\Web\FeriadoController;
 use App\Controllers\Web\StatsController;
+use App\Controllers\Web\DepartamentoController;
+use App\Controllers\Web\SolicitudAusenciaWebController;
 
 use App\Middleware\AuthAppMiddleware;
 use App\Middleware\AuthWebMiddleware;
@@ -45,6 +48,12 @@ $router->authAppGet('/v1/app/justificaciones',           [JustificacionAppContro
 $router->authAppPost('/v1/app/justificaciones',          [JustificacionAppController::class, 'store']);
 $router->authAppGet('/v1/app/justificaciones/{id}',      [JustificacionAppController::class, 'show']);
 $router->authAppDelete('/v1/app/justificaciones/{id}',   [JustificacionAppController::class, 'destroy']);
+
+// Solicitudes de ausencia (proactivo)
+$router->authAppGet('/v1/app/solicitudes-ausencia',           [SolicitudAusenciaAppController::class, 'index']);
+$router->authAppPost('/v1/app/solicitudes-ausencia',          [SolicitudAusenciaAppController::class, 'store']);
+$router->authAppGet('/v1/app/solicitudes-ausencia/{id}',      [SolicitudAusenciaAppController::class, 'show']);
+$router->authAppDelete('/v1/app/solicitudes-ausencia/{id}',   [SolicitudAusenciaAppController::class, 'destroy']);
 
 // ══════════════════════════════════════════════
 // PANEL WEB
@@ -88,7 +97,15 @@ $router->authWebDelete('/v1/web/sedes/{id}',             [SedeWebController::cla
 $router->authWebGet('/v1/web/horarios',                  [HorarioWebController::class, 'index']);
 $router->authWebPost('/v1/web/horarios',                 [HorarioWebController::class, 'store']);
 $router->authWebPut('/v1/web/horarios/{id}',             [HorarioWebController::class, 'update']);
+$router->authWebPut('/v1/web/horarios/{id}/dias',        [HorarioWebController::class, 'syncDias']);
 $router->authWebDelete('/v1/web/horarios/{id}',          [HorarioWebController::class, 'destroy']);
+
+// Departamentos
+$router->authWebGet('/v1/web/departamentos',             [DepartamentoController::class, 'index']);
+$router->authWebPost('/v1/web/departamentos',            [DepartamentoController::class, 'store']);
+$router->authWebGet('/v1/web/departamentos/{id}',        [DepartamentoController::class, 'show']);
+$router->authWebPut('/v1/web/departamentos/{id}',        [DepartamentoController::class, 'update']);
+$router->authWebDelete('/v1/web/departamentos/{id}',     [DepartamentoController::class, 'destroy']);
 
 // Feriados
 $router->authWebGet('/v1/web/feriados',                  [FeriadoController::class, 'index']);
@@ -110,6 +127,13 @@ $router->authWebGet('/v1/web/justificaciones/{id}',          [JustificacionWebCo
 $router->authWebPost('/v1/web/justificaciones/{id}/aprobar', [JustificacionWebController::class, 'aprobar']);
 $router->authWebPost('/v1/web/justificaciones/{id}/rechazar',[JustificacionWebController::class, 'rechazar']);
 $router->authWebDelete('/v1/web/justificaciones/{id}',       [JustificacionWebController::class, 'destroy']);
+
+// Solicitudes de ausencia (proactivo — el empleado pide antes del hecho)
+$router->authWebGet('/v1/web/solicitudes-ausencia',               [SolicitudAusenciaWebController::class, 'index']);
+$router->authWebGet('/v1/web/solicitudes-ausencia/{id}',          [SolicitudAusenciaWebController::class, 'show']);
+$router->authWebPost('/v1/web/solicitudes-ausencia/{id}/aprobar', [SolicitudAusenciaWebController::class, 'aprobar']);
+$router->authWebPost('/v1/web/solicitudes-ausencia/{id}/rechazar',[SolicitudAusenciaWebController::class, 'rechazar']);
+$router->authWebDelete('/v1/web/solicitudes-ausencia/{id}',       [SolicitudAusenciaWebController::class, 'destroy']);
 
 // Estadísticas
 // FIX Bug #12: StatsController solo tiene el método 'dashboard', no 'index'.
