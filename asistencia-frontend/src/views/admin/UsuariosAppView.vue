@@ -58,6 +58,7 @@
               <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Identidad</th>
               <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sede</th>
               <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Cargo</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Área</th>
               <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Horario</th>
               <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Estado</th>
               <th class="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Acciones</th>
@@ -76,6 +77,10 @@
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.instituciones?.[0]?.nombre || 'No asignado' }}</td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{{ user.instituciones?.[0]?.pivot?.cargo || 'No asignado' }}</td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <span v-if="user.departamento_nombre" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700">{{ user.departamento_nombre }}</span>
+                <span v-else class="text-slate-400 text-xs italic">Sin área</span>
+              </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
                 <div v-if="user.instituciones?.[0]" class="font-medium text-indigo-600">{{ user.instituciones[0].pivot?.hora_inicio || '—' }}</div>
                 <div v-if="user.instituciones?.[0]" class="text-xs">{{ user.instituciones[0].pivot?.fecha_inicio || '' }} </div>
@@ -158,7 +163,7 @@
              <input v-model="form.password" type="password" :required="!isEditing" class="input-field" placeholder="••••••••">
           </div>
           <div class="grid grid-cols-2 gap-4">
-             <div>
+            <div>
               <label class="block text-sm font-medium text-slate-700 mb-1">Cargo</label>
               <input v-model="form.cargo" type="text" class="input-field" placeholder="Inspector, Médico, etc.">
             </div>
@@ -167,12 +172,23 @@
               <input v-model="form.condicion_laboral" type="text" class="input-field" placeholder="CAS, Nombrado, etc.">
             </div>
           </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Sede asignada</label>
-            <select v-model="form.sede_id" class="input-field" required>
-              <option value="">Seleccione sede</option>
-              <option v-for="s in sedes" :key="s.id" :value="s.id">{{ s.nombre }}</option>
-            </select>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Departamento / Área</label>
+              <select v-model="form.departamento_id" class="input-field">
+                <option :value="null">(Sin departamento)</option>
+                <option v-for="dep in departamentos" :key="dep.id" :value="dep.id">
+                  {{ dep.nombre }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-1">Sede asignada</label>
+              <select v-model="form.sede_id" class="input-field" required>
+                <option value="">Seleccione sede</option>
+                <option v-for="s in sedes" :key="s.id" :value="s.id">{{ s.nombre }}</option>
+              </select>
+            </div>
           </div>
           <div class="flex justify-end space-x-3 pt-4 border-t border-slate-100">
             <button type="button" @click="closeModal" class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
@@ -363,6 +379,7 @@ const importResults = ref(null)
 const usuarios = ref([])
 const horariosList = ref([])
 const sedes = ref([])
+const departamentos = ref([])
 const selectedUser = ref(null)
 
 const loading = ref(true)
@@ -390,7 +407,8 @@ const form = reactive({
   estado: 'ACTIVO',
   cargo: '',
   condicion_laboral: '',
-  sede_id: null
+  sede_id: null,
+  departamento_id: null
 })
 
 const horarioForm = reactive({
@@ -403,10 +421,11 @@ const fetchInicial = async (page = 1) => {
   error.value = null
   currentPage.value = page
   try {
-    const [resUsuarios, resHorarios, resSedes] = await Promise.all([
+    const [resUsuarios, resHorarios, resSedes, resDepartamentos] = await Promise.all([
        api.get(`/v1/web/usuarios-app?page=${currentPage.value}&per_page=${perPage.value}`),
        api.get('/v1/web/horarios'),
-       api.get('/v1/web/sedes')
+       api.get('/v1/web/sedes'),
+       api.get('/v1/web/departamentos')
     ])
     const result = resUsuarios.data.data || resUsuarios.data;
     if (result.current_page) {
@@ -418,7 +437,9 @@ const fetchInicial = async (page = 1) => {
       usuarios.value = result || []
     }
     horariosList.value = resHorarios.data.data || resHorarios.data;
-    sedes.value = resSedes.data.data || resSedes.data  } catch (err) {
+    sedes.value = resSedes.data.data || resSedes.data
+    departamentos.value = resDepartamentos.data.data || resDepartamentos.data
+  } catch (err) {
     error.value = 'Error al obtener registros'
   } finally {
     loading.value = false
@@ -436,10 +457,11 @@ const openModal = (item = null) => {
     isEditing.value = true
     Object.assign(form, item)
     form.password = ''
-    form.codigo_modular = item.codigo // Map from 'codigo' payload property
+    form.codigo_modular = item.codigo
+    form.departamento_id = item.departamento_id ?? null
   } else {
     isEditing.value = false
-    Object.assign(form, { id: null, nombres: '', apellido_paterno: '', apellido_materno: '', dni: '', codigo_modular: '', email: '', password: '', estado: 'ACTIVO', cargo: '', condicion_laboral: '' })
+    Object.assign(form, { id: null, nombres: '', apellido_paterno: '', apellido_materno: '', dni: '', codigo_modular: '', email: '', password: '', estado: 'ACTIVO', cargo: '', condicion_laboral: '', sede_id: null, departamento_id: null })
   }
   isModalOpen.value = true
 }
@@ -526,7 +548,8 @@ const saveItem = async () => {
       email: form.email,
       password: form.password || undefined,
       cargo: form.cargo,
-      condicion_laboral: form.condicion_laboral
+      condicion_laboral: form.condicion_laboral,
+      departamento_id: form.departamento_id || null
     }
     if (isEditing.value && !form.password) delete payload.password
 

@@ -99,6 +99,7 @@ class UsuarioAppController extends BaseWebController
             FROM usuarios u
             LEFT JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
             INNER JOIN estados_usuario eu ON eu.id = u.estado_id
+            LEFT JOIN departamentos d ON d.id = ut.departamento_id
             WHERE {$whereClause}
             ORDER BY ut.apellidos, ut.nombres
             LIMIT :limit OFFSET :offset
