@@ -7,6 +7,5 @@
     <file>routes</file>
     <exclude-pattern>*/vendor/*</exclude-pattern>
     <arg name="colors"/>
-    <arg name="value"/>
-    <arg name="p"/>
+    <arg value="p"/>
 </ruleset>
