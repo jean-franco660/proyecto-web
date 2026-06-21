@@ -2,6 +2,7 @@
 
 namespace App\Middleware;
 
+use App\Core\Database;
 use App\Core\Response;
 
 class RateLimitMiddleware
@@ -54,7 +55,7 @@ class RateLimitMiddleware
                 $stmt = $db->prepare("INSERT INTO login_attempts (ip, endpoint, intentos, ultimo_intento) VALUES (?, ?, 1, NOW())");
                 $stmt->execute([$ip, $action]);
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             // Si la BD falla, no bloquear acceso para no degradar el servicio, pero loguear el error
             error_log("[RateLimitMiddleware] Error: " . $e->getMessage());
         }

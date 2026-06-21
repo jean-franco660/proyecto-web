@@ -349,6 +349,30 @@ class AsistenciaAppController extends BaseAppController
                 continue;
             }
 
+            // Validar que fecha_hora sea parseable y esté en rango razonable
+            $tsMovil = strtotime($fechaHora);
+            $tsNow   = time();
+            $limiteSuperior = $tsNow + 60;           // máx 1 min en el futuro (desfase de reloj)
+            $limiteInferior = $tsNow - (72 * 3600);  // máx 72 horas hacia atrás
+
+            if (!$tsMovil || $tsMovil > $limiteSuperior) {
+                $resultados[] = [
+                    'uuid'   => $uuid,
+                    'status' => 'rechazado',
+                    'error'  => 'La fecha/hora de la marcación está en el futuro'
+                ];
+                continue;
+            }
+
+            if ($tsMovil < $limiteInferior) {
+                $resultados[] = [
+                    'uuid'   => $uuid,
+                    'status' => 'rechazado',
+                    'error'  => 'La marcación es demasiado antigua (máximo 72 horas)'
+                ];
+                continue;
+            }
+
             try {
                 // Al sincronizar offline, guardamos en observacion que se sincronizó offline
                 $obs = "Sincronizado offline. Hora disp: " . $fechaHora;

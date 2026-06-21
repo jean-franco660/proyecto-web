@@ -3,5 +3,4 @@
 .env.production
 /vendor/
 /scripts/
-/bin/
 *.log
