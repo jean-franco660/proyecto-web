@@ -225,9 +225,9 @@ class AuthWebController
                 $errors[] = 'Email inválido';
             }
         }
-        
+
         $updatingPassword = ($password !== null && trim((string)$password) !== '');
-        
+
         if ($updatingPassword) {
             if (!\App\Core\Validator::isSecurePassword((string)$password)) {
                 $errors[] = 'La contraseña nueva debe tener al menos 8 caracteres y contener letras y números';
@@ -357,4 +357,3 @@ class AuthWebController
         }
     }
 }
-

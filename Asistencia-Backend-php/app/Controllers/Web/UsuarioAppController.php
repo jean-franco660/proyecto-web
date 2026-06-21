@@ -838,27 +838,27 @@ class UsuarioAppController extends BaseWebController
     {
         $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
-        
+
         $headers = [
-            'codigo_empleado', 'nombres', 'apellidos', 'dni', 'email', 
-            'telefono', 'password', 'cargo', 'condicion_laboral', 
+            'codigo_empleado', 'nombres', 'apellidos', 'dni', 'email',
+            'telefono', 'password', 'cargo', 'condicion_laboral',
             'sede_codigo', 'horario_nombre'
         ];
         foreach ($headers as $colIndex => $header) {
             $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
             $sheet->setCellValue($colLetter . '1', $header);
         }
-        
+
         $example = [
-            'EMP-001', 'Juan', 'Perez Garcia', '12345678', 'juan.perez@empresa.com', 
-            '987654321', 'password123', 'DOCENTE', 'Nombrado', 
+            'EMP-001', 'Juan', 'Perez Garcia', '12345678', 'juan.perez@empresa.com',
+            '987654321', 'password123', 'DOCENTE', 'Nombrado',
             'SEDE-001', 'Horario General'
         ];
         foreach ($example as $colIndex => $val) {
             $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
             $sheet->setCellValue($colLetter . '2', $val);
         }
-        
+
         $sheet->getStyle('A1:K1')->getFont()->setBold(true);
         foreach (range('A', 'K') as $colLetter) {
             $sheet->getColumnDimension($colLetter)->setAutoSize(true);
@@ -867,7 +867,7 @@ class UsuarioAppController extends BaseWebController
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment;filename="plantilla_trabajadores.xlsx"');
         header('Cache-Control: max-age=0');
-        
+
         $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
         $writer->save('php://output');
         exit;

@@ -429,4 +429,3 @@ class UsuarioWebController extends BaseWebController
         return $nuevoHorarioId;
     }
 }
-

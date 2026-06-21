@@ -256,19 +256,19 @@ class SedeWebController extends BaseWebController
     {
         $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
-        
+
         $headers = ['codigo', 'nombre', 'direccion', 'latitud', 'longitud', 'radio_metros'];
         foreach ($headers as $colIndex => $header) {
             $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
             $sheet->setCellValue($colLetter . '1', $header);
         }
-        
+
         $example = ['SEDE-001', 'Sede Central', 'Av. Principal 123', -12.046373, -77.042754, 100];
         foreach ($example as $colIndex => $val) {
             $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
             $sheet->setCellValue($colLetter . '2', $val);
         }
-        
+
         $sheet->getStyle('A1:F1')->getFont()->setBold(true);
         foreach (range('A', 'F') as $colLetter) {
             $sheet->getColumnDimension($colLetter)->setAutoSize(true);
@@ -277,7 +277,7 @@ class SedeWebController extends BaseWebController
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment;filename="plantilla_sedes.xlsx"');
         header('Cache-Control: max-age=0');
-        
+
         $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
         $writer->save('php://output');
         exit;
