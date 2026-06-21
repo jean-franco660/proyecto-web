@@ -21,6 +21,11 @@ const router = createRouter({
           component: () => import('@/views/dashboard/DashboardView.vue')
         },
         {
+          path: 'perfil',
+          name: 'perfil',
+          component: () => import('@/views/admin/ProfileView.vue')
+        },
+        {
           path: 'sedes',
           name: 'sedes',
           component: () => import('@/views/admin/SedesView.vue'),

@@ -1,9 +1,28 @@
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
+    <div class="flex items-center justify-between flex-wrap gap-4">
       <h2 class="text-2xl font-bold text-slate-800 tracking-tight">Dashboard General</h2>
-      <div class="flex space-x-3">
-        <button @click="loadStats" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg shadow-sm hover:bg-slate-50 transition-colors flex items-center space-x-2 text-sm font-medium">
+      <div class="flex items-center space-x-3">
+        <!-- Selector de Sedes -->
+        <div class="flex items-center space-x-2">
+          <label for="sede-selector" class="text-sm font-medium text-slate-500 hidden sm:inline">Sede:</label>
+          <select 
+            id="sede-selector"
+            v-model="selectedSede" 
+            @change="loadStats" 
+            class="px-3 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg shadow-sm hover:bg-slate-50 transition-colors focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium min-w-[180px] outline-none"
+            :disabled="loading"
+          >
+            <option value="">
+              {{ authStore.user?.rol === 'administrador' ? 'Todas las sedes' : 'Todas mis sedes' }}
+            </option>
+            <option v-for="sede in sedes" :key="sede.id" :value="sede.id">
+              {{ sede.nombre }}
+            </option>
+          </select>
+        </div>
+
+        <button @click="loadStats" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg shadow-sm hover:bg-slate-50 transition-colors flex items-center space-x-2 text-sm font-medium" :disabled="loading">
           <svg :class="{ 'animate-spin': loading }" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
           <span>Actualizar</span>
         </button>
@@ -163,28 +182,52 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import api from '@/api/axios'
+import { useAuthStore } from '@/store/auth'
+
+const authStore = useAuthStore()
 
 const stats = ref(null)
 const loading = ref(true)
 const error = ref(null)
 
+const sedes = ref([])
+const selectedSede = ref('')
+
+const fetchSedes = async () => {
+  try {
+    const response = await api.get('/v1/web/sedes/mis-sedes')
+    sedes.value = response.data.data || response.data
+  } catch (err) {
+    console.error('Error al obtener sedes para el selector', err)
+  }
+}
+
 const loadStats = async () => {
   loading.value = true
   error.value = null
   try {
-    const response = await api.get('/v1/web/stats')
+    const params = {}
+    if (selectedSede.value) {
+      params.sede_id = selectedSede.value
+    }
+    const response = await api.get('/v1/web/stats', { params })
     // El backend devuelve: usuariosApp, sedes, asistenciasHoy, presentes, tardanzas,
     // faltas, justificados, justificacionesPendientes, observadas_pendientes, fecha
     stats.value = response.data.data || response.data
   } catch (err) {
     console.error('Error cargando stats', err)
-    error.value = 'No se pudieron cargar las estadísticas. Verifica la conexión con el servidor.'
+    if (err.response?.status === 403) {
+      error.value = err.response.data?.error || 'Sin acceso a esta sede.'
+    } else {
+      error.value = 'No se pudieron cargar las estadísticas. Verifica la conexión con el servidor.'
+    }
   } finally {
     loading.value = false
   }
 }
 
-onMounted(() => {
-  loadStats()
+onMounted(async () => {
+  await fetchSedes()
+  await loadStats()
 })
 </script>

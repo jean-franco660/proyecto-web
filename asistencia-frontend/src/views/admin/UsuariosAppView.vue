@@ -3,7 +3,7 @@
     <div class="flex justify-between items-center pb-4 border-b border-slate-200">
       <h2 class="text-2xl font-bold text-slate-800">Trabajadores</h2>
       <div class="flex space-x-3">
-         <button @click="openResetsModal()" class="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition-colors font-medium shadow-sm flex items-center space-x-2 text-sm">
+         <button v-if="isAdmin" @click="openResetsModal()" class="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition-colors font-medium shadow-sm flex items-center space-x-2 text-sm">
           <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
           <span>Solicitudes de Contraseña</span>
          </button>
@@ -291,7 +291,7 @@
     <div v-if="isImportModalOpen" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div class="bg-white rounded-2xl p-6 w-full max-w-lg shadow-xl flex flex-col max-h-[90vh]">
         <div class="flex justify-between items-center pb-3 border-b border-slate-100">
-          <h3 class="text-lg font-bold text-slate-800">Importar Trabajadores desde Excel (CSV)</h3>
+          <h3 class="text-lg font-bold text-slate-800">Importar Trabajadores desde Excel (.xlsx)</h3>
           <button @click="isImportModalOpen = false" class="text-slate-400 hover:text-slate-600">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
@@ -299,14 +299,21 @@
 
         <div class="py-4 space-y-4 flex-1 overflow-y-auto">
           <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
-            <p class="font-bold">Estructura requerida del archivo CSV:</p>
-            <p class="font-mono bg-white p-1.5 rounded border border-slate-100 overflow-x-auto select-all">codigo_empleado,nombres,apellidos,dni,email,telefono,password,cargo,condicion_laboral,sede_codigo,horario_nombre</p>
+            <p class="font-bold">Estructura requerida de las columnas de Excel:</p>
+            <p class="font-mono bg-white p-1.5 rounded border border-slate-100 overflow-x-auto select-all">codigo_empleado, nombres, apellidos, dni, email, telefono, password, cargo, condicion_laboral, sede_codigo, horario_nombre</p>
             <p class="mt-1">* Nota: Los campos codigo_empleado, nombres, apellidos y DNI son requeridos. El correo se autogenera si se deja vacío. Si se define un codigo de sede y nombre de horario válidos, se creará la asignación automática.</p>
+            <p class="mt-1">* Nota: Se recomienda descargar la plantilla estructurada para evitar errores de importación.</p>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Seleccionar archivo</label>
-            <input type="file" ref="fileInput" accept=".csv" class="input-field py-1.5 text-sm">
+            <div class="flex justify-between items-center mb-1">
+              <label class="block text-sm font-medium text-slate-700">Seleccionar archivo Excel</label>
+              <button @click="downloadTemplate" type="button" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center space-x-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                <span>Descargar Plantilla (.xlsx)</span>
+              </button>
+            </div>
+            <input type="file" ref="fileInput" accept=".xlsx" class="input-field py-1.5 text-sm">
           </div>
 
           <!-- Resultados de importación -->
@@ -340,6 +347,7 @@ import { useAuthStore } from '@/store/auth'
 const toast = useToast()
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.isAdmin)
+const isSupervisor = computed(() => authStore.isSupervisor)
 
 const isResetsModalOpen = ref(false)
 const resetsList = ref([])
@@ -525,13 +533,13 @@ const saveItem = async () => {
     if (isEditing.value) {
       const updatePayload = {
         ...payload,
-        asignaciones: form.sede_id ? [{ institucion_id: form.sede_id, cargo: cargo || 'DOCENTE', estado: 'ACTIVO' }] : []
+        asignaciones: form.sede_id ? [{ institucion_id: form.sede_id, cargo: form.cargo || 'DOCENTE', estado: 'ACTIVO' }] : []
       }
       await api.put(`/v1/web/usuarios-app/${form.id}`, updatePayload)
     } else {
       const createPayload = {
         ...payload,
-        asignaciones: form.sede_id ? [{ institucion_id: form.sede_id, cargo: cargo || 'DOCENTE', estado: 'ACTIVO' }] : []
+        asignaciones: form.sede_id ? [{ institucion_id: form.sede_id, cargo: form.cargo || 'DOCENTE', estado: 'ACTIVO' }] : []
       }
       await api.post('/v1/web/usuarios-app', createPayload)
     }
@@ -636,7 +644,7 @@ const openImportModal = () => {
 const uploadFile = async () => {
   const file = fileInput.value.files[0]
   if (!file) {
-    alert('Por favor seleccione un archivo CSV.')
+    alert('Por favor seleccione un archivo Excel (.xlsx).')
     return
   }
 
@@ -657,6 +665,24 @@ const uploadFile = async () => {
     alert(err.response?.data?.error || 'Error al importar trabajadores')
   } finally {
     importing.value = false
+  }
+}
+
+const downloadTemplate = async () => {
+  try {
+    const response = await api.get('/v1/web/usuarios-app/import/template', {
+      responseType: 'blob'
+    })
+    const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', 'plantilla_trabajadores.xlsx')
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  } catch (err) {
+    toast.error('Error al descargar la plantilla')
   }
 }
 

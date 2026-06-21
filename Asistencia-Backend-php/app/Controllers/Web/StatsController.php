@@ -43,21 +43,31 @@ class StatsController extends BaseWebController
         $whereSede = '1=1';
         $params    = [':fecha' => $fecha];
 
-        // Supervisor: solo sus sedes
+        $misSedes = [];
         if ($this->rol() === 'supervisor') {
             $misSedes = $this->sedesDelSupervisor();
             if (empty($misSedes)) {
                 Response::success([
-                    'fecha'                     => $fecha,
-                    'presentes'                 => 0,
-                    'tardanzas'                 => 0,
-                    'faltas'                    => 0,
-                    'justificados'              => 0,
-                    'total_registrados'         => 0,
+                    'fecha'                      => $fecha,
+                    'presentes'                  => 0,
+                    'tardanzas'                  => 0,
+                    'faltas'                     => 0,
+                    'justificados'               => 0,
+                    'total_registrados'          => 0,
+                    'asistenciasHoy'             => 0,
+                    'usuariosApp'                => 0,
+                    'sedes'                      => 0,
+                    'observadas_pendientes'      => 0,
                     'justificaciones_pendientes' => 0,
                 ]);
                 return;
             }
+
+            // Validar autorización de sede si se especifica sede_id
+            if ($sedeId && !in_array((int)$sedeId, $misSedes)) {
+                Response::error('Sin acceso a esta sede', 403);
+            }
+
             $in = implode(',', array_map('intval', $misSedes));
             $whereSede = "us.sede_id IN ({$in})";
         }
@@ -88,7 +98,6 @@ class StatsController extends BaseWebController
         $params3 = [];
 
         if ($this->rol() === 'supervisor') {
-            $misSedes = $this->sedesDelSupervisor();
             $in = implode(',', array_map('intval', $misSedes));
             $whereJust .= " AND j.usuario_id IN (
                 SELECT us2.usuario_id FROM usuario_sede us2
@@ -115,6 +124,94 @@ class StatsController extends BaseWebController
         $stmt3->execute($params3);
         $justPendientes = $stmt3->fetch();
 
+        // Calcular Sedes Activas
+        $countSedes = 0;
+        if ($this->rol() === 'administrador') {
+            if ($sedeId) {
+                $countSedes = 1;
+            } else {
+                $stmtSedes = $this->db->query("SELECT COUNT(*) FROM sedes WHERE activo = 1");
+                $countSedes = (int) $stmtSedes->fetchColumn();
+            }
+        } else {
+            // Supervisor
+            if ($sedeId) {
+                $countSedes = in_array((int)$sedeId, $misSedes) ? 1 : 0;
+            } else {
+                $countSedes = count($misSedes);
+            }
+        }
+
+        // Calcular Trabajadores Activos
+        $countWorkers = 0;
+        if ($this->rol() === 'administrador') {
+            if ($sedeId) {
+                $stmtWorkers = $this->db->prepare("
+                    SELECT COUNT(DISTINCT us.usuario_id) 
+                    FROM usuario_sede us
+                    JOIN usuarios u ON u.id = us.usuario_id
+                    JOIN usuario_roles ur ON ur.usuario_id = u.id
+                    WHERE us.sede_id = ?
+                      AND us.estado = 1
+                      AND (us.fecha_fin IS NULL OR us.fecha_fin >= CURDATE())
+                      AND ur.rol_id = 3
+                      AND u.estado_id = 1
+                ");
+                $stmtWorkers->execute([$sedeId]);
+                $countWorkers = (int) $stmtWorkers->fetchColumn();
+            } else {
+                $stmtWorkers = $this->db->query("
+                    SELECT COUNT(DISTINCT u.id) 
+                    FROM usuarios u
+                    JOIN usuario_roles ur ON ur.usuario_id = u.id
+                    WHERE ur.rol_id = 3 AND u.estado_id = 1
+                ");
+                $countWorkers = (int) $stmtWorkers->fetchColumn();
+            }
+        } else {
+            // Supervisor
+            if ($sedeId) {
+                $stmtWorkers = $this->db->prepare("
+                    SELECT COUNT(DISTINCT us.usuario_id) 
+                    FROM usuario_sede us
+                    JOIN usuarios u ON u.id = us.usuario_id
+                    JOIN usuario_roles ur ON ur.usuario_id = u.id
+                    WHERE us.sede_id = ?
+                      AND us.estado = 1
+                      AND (us.fecha_fin IS NULL OR us.fecha_fin >= CURDATE())
+                      AND ur.rol_id = 3
+                      AND u.estado_id = 1
+                ");
+                $stmtWorkers->execute([$sedeId]);
+                $countWorkers = (int) $stmtWorkers->fetchColumn();
+            } else {
+                $in = implode(',', array_map('intval', $misSedes));
+                $stmtWorkers = $this->db->query("
+                    SELECT COUNT(DISTINCT us.usuario_id) 
+                    FROM usuario_sede us
+                    JOIN usuarios u ON u.id = us.usuario_id
+                    JOIN usuario_roles ur ON ur.usuario_id = u.id
+                    WHERE us.sede_id IN ({$in})
+                      AND us.estado = 1
+                      AND (us.fecha_fin IS NULL OR us.fecha_fin >= CURDATE())
+                      AND ur.rol_id = 3
+                      AND u.estado_id = 1
+                ");
+                $countWorkers = (int) $stmtWorkers->fetchColumn();
+            }
+        }
+
+        // Calcular Marcaciones Observadas Pendientes
+        $stmtObs = $this->db->prepare("
+            SELECT COUNT(*) 
+            FROM marcaciones m
+            INNER JOIN asistencias a ON a.id = m.asistencia_id
+            INNER JOIN usuario_sede us ON us.id = a.usuario_sede_id
+            WHERE {$whereSede} AND m.activo = 1 AND m.observacion IS NOT NULL AND m.observacion != '' AND a.fecha = :fecha
+        ");
+        $stmtObs->execute($params);
+        $observadasPendientes = (int) $stmtObs->fetchColumn();
+
         Response::success([
             'fecha'                      => $fecha,
             'presentes'                  => (int) ($totales['presentes'] ?? 0),
@@ -122,6 +219,10 @@ class StatsController extends BaseWebController
             'faltas'                     => (int) ($totales['faltas'] ?? 0),
             'justificados'               => (int) ($totales['justificados'] ?? 0),
             'total_registrados'          => (int) ($totales['total'] ?? 0),
+            'asistenciasHoy'             => (int) ($totales['total'] ?? 0),
+            'usuariosApp'                => $countWorkers,
+            'sedes'                      => $countSedes,
+            'observadas_pendientes'      => $observadasPendientes,
             'justificaciones_pendientes' => (int) ($justPendientes['justificaciones_pendientes'] ?? 0),
         ]);
     }

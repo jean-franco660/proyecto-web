@@ -36,6 +36,7 @@ if (!$command) {
     echo "  db:migrate      - Aplicar migraciones pendientes a la base de datos\n";
     echo "  db:seed-admin   - Crear o sembrar una cuenta de administrador de forma segura\n";
     echo "  tokens:clean    - Limpiar tokens expirados de la base de datos (blacklist)\n";
+    echo "  auth:reset-2fa  - Limpiar el código 2FA de un administrador (Uso: auth:reset-2fa <email>)\n";
     exit(1);
 }
 
@@ -186,6 +187,36 @@ switch ($command) {
             echo "¡Limpieza completada con éxito!\n";
         } catch (Exception $ex) {
             echo "Error al limpiar tokens: " . $ex->getMessage() . "\n";
+            exit(1);
+        }
+        break;
+
+    case 'auth:reset-2fa':
+        echo "=== RESTABLECER AUTENTICACIÓN 2FA ===\n";
+        $email = $argv[2] ?? null;
+        if (!$email) {
+            echo "Error: Debes proporcionar el correo electrónico del usuario.\n";
+            echo "Uso: php bin/console.php auth:reset-2fa <email>\n";
+            exit(1);
+        }
+
+        try {
+            // Verificar si el usuario existe
+            $stmt = $db->prepare("SELECT id FROM usuarios WHERE email = ?");
+            $stmt->execute([$email]);
+            $user = $stmt->fetch();
+            if (!$user) {
+                echo "Error: No existe ningún usuario registrado con el correo '$email'.\n";
+                exit(1);
+            }
+
+            // Limpiar código 2FA
+            $stmt = $db->prepare("UPDATE usuarios SET verification_code = NULL, verification_expires_at = NULL WHERE id = ?");
+            $stmt->execute([$user['id']]);
+
+            echo "¡Código 2FA para el usuario '$email' restablecido con éxito!\n";
+        } catch (Exception $ex) {
+            echo "Error al restablecer 2FA: " . $ex->getMessage() . "\n";
             exit(1);
         }
         break;

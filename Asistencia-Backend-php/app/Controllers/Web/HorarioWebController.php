@@ -27,8 +27,27 @@ class HorarioWebController extends BaseWebController
     public function index(Request $req): void
     {
         $sedeId = (int) $req->query('sede_id', 0);
-        $rol    = $_REQUEST['auth_user']['rol'] ?? '';
-        $userId = (int) ($_REQUEST['auth_user']['sub'] ?? 0);
+        $rol    = $this->rol();
+        $userId = $this->userId();
+
+        if ($rol === 'supervisor') {
+            $stmt = $this->db->prepare("
+                SELECT sede_id FROM usuario_sede
+                WHERE usuario_id = :uid AND estado = 1
+                  AND (fecha_fin IS NULL OR fecha_fin >= CURDATE())
+            ");
+            $stmt->execute([':uid' => $userId]);
+            $misSedes = array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'sede_id');
+
+            if (empty($misSedes)) {
+                Response::success([]);
+                return;
+            }
+
+            if ($sedeId && !in_array($sedeId, $misSedes)) {
+                Response::error('Sin acceso a esta sede', 403);
+            }
+        }
 
         Response::success($this->model->listarConFiltros($sedeId, $rol, $userId));
     }
@@ -40,6 +59,7 @@ class HorarioWebController extends BaseWebController
     public function store(Request $req): void
     {
         $sedeId   = (int) $req->input('sede_id');
+        $this->validarAccesoSede($sedeId);
         $nombre   = (string) $req->input('nombre');
         $hEntrada = (string) $req->input('hora_entrada');
         $hSalida  = (string) $req->input('hora_salida');
@@ -90,6 +110,7 @@ class HorarioWebController extends BaseWebController
     public function update(Request $req): void
     {
         $id = (int) $req->param('id');
+        $this->validarAccesoHorario($id);
 
         $data = [];
         $nombre   = $req->input('nombre');
@@ -137,6 +158,7 @@ class HorarioWebController extends BaseWebController
     public function syncDias(Request $req): void
     {
         $id   = (int) $req->param('id');
+        $this->validarAccesoHorario($id);
         $dias = $req->input('dias', []);
 
         if (!is_array($dias)) {
@@ -157,6 +179,7 @@ class HorarioWebController extends BaseWebController
     public function destroy(Request $req): void
     {
         $id = (int) $req->param('id');
+        $this->validarAccesoHorario($id);
         try {
             $this->model->eliminarHorario($id);
         } catch (\PDOException $e) {
@@ -167,5 +190,38 @@ class HorarioWebController extends BaseWebController
             Response::error('Error al eliminar el horario', 500);
         }
         Response::success(null, 'Horario eliminado correctamente');
+    }
+
+    private function validarAccesoSede(int $sedeId): void
+    {
+        if ($this->esAdmin()) {
+            return;
+        }
+
+        $stmt = $this->db->prepare("
+            SELECT 1 FROM usuario_sede
+            WHERE usuario_id = ? AND sede_id = ? AND estado = 1
+              AND (fecha_fin IS NULL OR fecha_fin >= CURDATE())
+        ");
+        $stmt->execute([$this->userId(), $sedeId]);
+        if (!$stmt->fetch()) {
+            Response::error('Sin acceso a esta sede', 403);
+        }
+    }
+
+    private function validarAccesoHorario(int $horarioId): void
+    {
+        if ($this->esAdmin()) {
+            return;
+        }
+
+        $stmt = $this->db->prepare("SELECT sede_id FROM horarios_sede WHERE id = ?");
+        $stmt->execute([$horarioId]);
+        $sedeId = $stmt->fetchColumn();
+        if (!$sedeId) {
+            Response::notFound('Horario no encontrado');
+        }
+
+        $this->validarAccesoSede((int) $sedeId);
     }
 }

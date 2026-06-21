@@ -58,6 +58,7 @@ $router->post('/v1/web/verify-2fa', [AuthWebController::class, 'verify2fa']);
 // Protegidas (JWT tipo 'web')
 $router->authWebPost('/v1/web/logout', [AuthWebController::class, 'logout']);
 $router->authWebGet('/v1/web/me', [AuthWebController::class, 'me']);
+$router->authWebPut('/v1/web/profile', [AuthWebController::class, 'updateProfile']);
 
 // Gestión de usuarios del panel (Solo administrador)
 $router->authWebGet('/v1/web/usuarios-web', [UsuarioWebController::class, 'index']);
@@ -65,6 +66,8 @@ $router->authWebPost('/v1/web/usuarios-web', [UsuarioWebController::class, 'stor
 $router->authWebGet('/v1/web/usuarios-web/{id}', [UsuarioWebController::class, 'show']);
 $router->authWebPut('/v1/web/usuarios-web/{id}', [UsuarioWebController::class, 'update']);
 $router->authWebPatch('/v1/web/usuarios-web/{id}/estado', [UsuarioWebController::class, 'cambiarEstado']);
+$router->authWebDelete('/v1/web/usuarios-web/{id}', [UsuarioWebController::class, 'destroy']);
+
 
 // Gestión de trabajadores
 $router->authWebGet('/v1/web/usuarios-app', [UsuarioAppController::class, 'index']);
@@ -76,6 +79,7 @@ $router->authWebPatch('/v1/web/usuarios-app/{id}/estado', [UsuarioAppController:
 $router->authWebPatch('/v1/web/usuarios-app/{id}/horario', [UsuarioAppController::class, 'asignarHorario']);
 $router->authWebPost('/v1/web/usuario-app-institucion/{id}/inactivar', [UsuarioAppController::class, 'inactivarAsignacion']);
 $router->authWebGet('/v1/web/usuarios-app/import/stats', [UsuarioAppController::class, 'importStats']);
+$router->authWebGet('/v1/web/usuarios-app/import/template', [UsuarioAppController::class, 'downloadTemplate']);
 $router->authWebPost('/v1/web/usuarios-app/import', [UsuarioAppController::class, 'importar']);
 
 // Recuperación de contraseñas de trabajadores (App)
@@ -87,6 +91,7 @@ $router->authWebPost('/v1/web/password-resets-app/{id}/rechazar', [UsuarioAppCon
 $router->authWebGet('/v1/web/sedes', [SedeWebController::class, 'index']);
 $router->authWebGet('/v1/web/sedes/mis-sedes', [SedeWebController::class, 'misSedes']);
 $router->authWebGet('/v1/web/sedes/import/stats', [SedeWebController::class, 'importStats']);
+$router->authWebGet('/v1/web/sedes/import/template', [SedeWebController::class, 'downloadTemplate']);
 $router->authWebPost('/v1/web/sedes/import', [SedeWebController::class, 'importar']);
 $router->authWebPost('/v1/web/sedes', [SedeWebController::class, 'store']);
 $router->authWebGet('/v1/web/sedes/{id}', [SedeWebController::class, 'show']);

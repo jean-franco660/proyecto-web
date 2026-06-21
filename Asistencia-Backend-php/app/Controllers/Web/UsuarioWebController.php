@@ -31,12 +31,16 @@ class UsuarioWebController extends BaseWebController
                        eu.nombre AS estado,
                        us.nombre AS nombre,
                        r.nombre AS rol,
-                       u.created_at
+                       u.created_at,
+                       s.id AS sede_id,
+                       s.nombre AS sede
                 FROM usuarios u
-                INNER JOIN usuario_roles ur  ON ur.usuario_id = u.id
-                INNER JOIN roles r           ON r.id = ur.rol_id
-                INNER JOIN estados_usuario eu ON eu.id = u.estado_id
-                LEFT JOIN usuarios_staff us  ON us.usuario_id = u.id
+                INNER JOIN usuario_roles ur   ON ur.usuario_id = u.id
+                INNER JOIN roles r            ON r.id = ur.rol_id
+                INNER JOIN estados_usuario eu  ON eu.id = u.estado_id
+                LEFT JOIN usuarios_staff us   ON us.usuario_id = u.id
+                LEFT JOIN usuario_sede use_s  ON use_s.usuario_id = u.id AND use_s.estado = 1 AND (use_s.fecha_fin IS NULL OR use_s.fecha_fin >= CURDATE())
+                LEFT JOIN sedes s             ON s.id = use_s.sede_id
                 WHERE r.nombre IN ('ADMIN', 'SUPERVISOR')
                 ORDER BY r.nombre, us.nombre
             ");
@@ -64,12 +68,16 @@ class UsuarioWebController extends BaseWebController
             SELECT u.id, u.email, u.estado_id,
                    eu.nombre AS estado,
                    us.nombre AS nombre,
-                   r.nombre AS rol
+                   r.nombre AS rol,
+                   s.id AS sede_id,
+                   s.nombre AS sede
             FROM usuarios u
-            INNER JOIN usuario_roles ur  ON ur.usuario_id = u.id
-            INNER JOIN roles r           ON r.id = ur.rol_id
-            INNER JOIN estados_usuario eu ON eu.id = u.estado_id
-            LEFT JOIN usuarios_staff us  ON us.usuario_id = u.id
+            INNER JOIN usuario_roles ur   ON ur.usuario_id = u.id
+            INNER JOIN roles r            ON r.id = ur.rol_id
+            INNER JOIN estados_usuario eu  ON eu.id = u.estado_id
+            LEFT JOIN usuarios_staff us   ON us.usuario_id = u.id
+            LEFT JOIN usuario_sede use_s  ON use_s.usuario_id = u.id AND use_s.estado = 1 AND (use_s.fecha_fin IS NULL OR use_s.fecha_fin >= CURDATE())
+            LEFT JOIN sedes s             ON s.id = use_s.sede_id
             WHERE u.id = ? AND r.nombre IN ('ADMIN', 'SUPERVISOR')
         ");
         $stmt->execute([$id]);
@@ -160,6 +168,18 @@ class UsuarioWebController extends BaseWebController
             $this->db->prepare("INSERT INTO usuarios_staff (usuario_id, nombre) VALUES (?, ?)")
                 ->execute([$nuevoId, $nombre]);
 
+            // Asignar Sede si es Supervisor
+            if ($rol === 'supervisor') {
+                $sedeId = (int) $req->input('sede_id');
+                if ($sedeId > 0) {
+                    $horarioId = $this->obtenerOCrearHorarioDefecto($sedeId);
+                    $this->db->prepare("
+                        INSERT INTO usuario_sede (usuario_id, sede_id, horario_id, fecha_inicio, estado)
+                        VALUES (?, ?, ?, CURDATE(), 1)
+                    ")->execute([$nuevoId, $sedeId, $horarioId]);
+                }
+            }
+
             $this->db->commit();
             Response::success(['id' => $nuevoId], 'Usuario web creado correctamente', 201);
         } catch (\Exception $e) {
@@ -174,6 +194,44 @@ class UsuarioWebController extends BaseWebController
     {
         $this->soloAdministrador();
         $id = (int) $req->param('id');
+
+        // Validar si el usuario a modificar es el único administrador activo
+        $stmt = $this->db->prepare("
+            SELECT u.estado_id, r.nombre AS rol
+            FROM usuarios u
+            INNER JOIN usuario_roles ur ON ur.usuario_id = u.id
+            INNER JOIN roles r ON r.id = ur.rol_id
+            WHERE u.id = ?
+        ");
+        $stmt->execute([$id]);
+        $currentUser = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if ($currentUser && $currentUser['rol'] === 'ADMIN' && (int)$currentUser['estado_id'] === 1) {
+            $changingRoleToNonAdmin = ($req->input('rol') !== null && $req->input('rol') !== 'administrador');
+            $changingStateToInactive = false;
+            if ($req->input('estado') !== null) {
+                $estadoMap = ['ACTIVO' => 1, 'INACTIVO' => 2, 'BLOQUEADO' => 3];
+                $estadoId = $estadoMap[strtoupper(trim($req->input('estado')))] ?? null;
+                if ($estadoId && $estadoId !== 1) {
+                    $changingStateToInactive = true;
+                }
+            }
+
+            if ($changingRoleToNonAdmin || $changingStateToInactive) {
+                $countStmt = $this->db->query("
+                    SELECT COUNT(*) 
+                    FROM usuario_roles ur 
+                    JOIN roles r ON r.id = ur.rol_id 
+                    JOIN usuarios u ON u.id = ur.usuario_id 
+                    WHERE r.nombre = 'ADMIN' AND u.estado_id = 1
+                ");
+                $activeAdminsCount = (int)$countStmt->fetchColumn();
+
+                if ($activeAdminsCount <= 1) {
+                    Response::error('No puedes degradar o desactivar al único administrador activo', 422);
+                }
+            }
+        }
 
         $this->db->beginTransaction();
         try {
@@ -224,6 +282,31 @@ class UsuarioWebController extends BaseWebController
                     ->execute([$id, $nuevoRolId]);
             }
 
+            // Actualizar sede si es/sigue siendo supervisor
+            $nuevoRol = $req->input('rol') !== null ? $req->input('rol') : ($currentUser ? strtolower($currentUser['rol']) : '');
+            if ($nuevoRol === 'supervisor') {
+                $sedeId = (int) $req->input('sede_id');
+                if ($sedeId > 0) {
+                    // Inactivar asignaciones anteriores
+                    $this->db->prepare("
+                        UPDATE usuario_sede SET estado = 0, fecha_fin = CURDATE()
+                        WHERE usuario_id = ? AND estado = 1
+                    ")->execute([$id]);
+
+                    $horarioId = $this->obtenerOCrearHorarioDefecto($sedeId);
+                    $this->db->prepare("
+                        INSERT INTO usuario_sede (usuario_id, sede_id, horario_id, fecha_inicio, estado)
+                        VALUES (?, ?, ?, CURDATE(), 1)
+                    ")->execute([$id, $sedeId, $horarioId]);
+                }
+            } else if ($nuevoRol === 'administrador') {
+                // Inactivar asignaciones si ahora es admin
+                $this->db->prepare("
+                    UPDATE usuario_sede SET estado = 0, fecha_fin = CURDATE()
+                    WHERE usuario_id = ? AND estado = 1
+                ")->execute([$id]);
+            }
+
             $this->db->commit();
             Response::success(null, 'Usuario web actualizado correctamente');
         } catch (\Exception $e) {
@@ -246,7 +329,104 @@ class UsuarioWebController extends BaseWebController
             Response::unprocessable('Estado inválido');
         }
 
+        // Evitar desactivar al único administrador activo
+        if ($estadoId !== 1) {
+            $stmt = $this->db->prepare("
+                SELECT u.estado_id, r.nombre AS rol
+                FROM usuarios u
+                INNER JOIN usuario_roles ur ON ur.usuario_id = u.id
+                INNER JOIN roles r ON r.id = ur.rol_id
+                WHERE u.id = ?
+            ");
+            $stmt->execute([$id]);
+            $currentUser = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+            if ($currentUser && $currentUser['rol'] === 'ADMIN' && (int)$currentUser['estado_id'] === 1) {
+                $countStmt = $this->db->query("
+                    SELECT COUNT(*) 
+                    FROM usuario_roles ur 
+                    JOIN roles r ON r.id = ur.rol_id 
+                    JOIN usuarios u ON u.id = ur.usuario_id 
+                    WHERE r.nombre = 'ADMIN' AND u.estado_id = 1
+                ");
+                $activeAdminsCount = (int)$countStmt->fetchColumn();
+
+                if ($activeAdminsCount <= 1) {
+                    Response::error('No puedes desactivar al único administrador activo', 422);
+                }
+            }
+        }
+
         $this->db->prepare("UPDATE usuarios SET estado_id = ? WHERE id = ?")->execute([$estadoId, $id]);
         Response::success(null, "Estado cambiado a {$estado}");
     }
+
+    /** DELETE /v1/web/usuarios-web/{id} — eliminar un administrador o supervisor */
+    public function destroy(Request $req): void
+    {
+        $this->soloAdministrador();
+        $id = (int) $req->param('id');
+
+        // Validar si el usuario a eliminar es el único administrador activo
+        $stmt = $this->db->prepare("
+            SELECT u.estado_id, r.nombre AS rol
+            FROM usuarios u
+            INNER JOIN usuario_roles ur ON ur.usuario_id = u.id
+            INNER JOIN roles r ON r.id = ur.rol_id
+            WHERE u.id = ?
+        ");
+        $stmt->execute([$id]);
+        $currentUser = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if ($currentUser && $currentUser['rol'] === 'ADMIN' && (int)$currentUser['estado_id'] === 1) {
+            $countStmt = $this->db->query("
+                SELECT COUNT(*) 
+                FROM usuario_roles ur 
+                JOIN roles r ON r.id = ur.rol_id 
+                JOIN usuarios u ON u.id = ur.usuario_id 
+                WHERE r.nombre = 'ADMIN' AND u.estado_id = 1
+            ");
+            $activeAdminsCount = (int)$countStmt->fetchColumn();
+
+            if ($activeAdminsCount <= 1) {
+                Response::error('No puedes eliminar al único administrador activo', 422);
+            }
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $this->db->prepare("DELETE FROM usuarios WHERE id = ?")->execute([$id]);
+            $this->db->commit();
+            Response::success(null, 'Usuario web eliminado correctamente');
+        } catch (\Exception $e) {
+            $this->db->rollBack();
+            error_log('[UsuarioWebController::destroy] Error: ' . $e->getMessage());
+            Response::error('Error al eliminar el usuario web. Intente nuevamente.', 500);
+        }
+    }
+
+    private function obtenerOCrearHorarioDefecto(int $sedeId): int
+    {
+        $stmt = $this->db->prepare("SELECT id FROM horarios_sede WHERE sede_id = ? AND activo = 1 LIMIT 1");
+        $stmt->execute([$sedeId]);
+        $id = $stmt->fetchColumn();
+        if ($id) {
+            return (int) $id;
+        }
+
+        $stmtInsert = $this->db->prepare("
+            INSERT INTO horarios_sede (sede_id, nombre, hora_entrada, hora_salida, tolerancia_entrada, tolerancia_salida, activo)
+            VALUES (?, 'Horario General', '08:00:00', '17:00:00', 15, 15, 1)
+        ");
+        $stmtInsert->execute([$sedeId]);
+        $nuevoHorarioId = (int) $this->db->lastInsertId();
+
+        $stmtDia = $this->db->prepare("INSERT INTO horario_dias (horario_id, dia) VALUES (?, ?)");
+        for ($d = 1; $d <= 5; $d++) {
+            $stmtDia->execute([$nuevoHorarioId, $d]);
+        }
+
+        return $nuevoHorarioId;
+    }
 }
+

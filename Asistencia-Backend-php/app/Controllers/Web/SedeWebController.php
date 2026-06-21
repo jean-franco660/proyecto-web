@@ -153,54 +153,69 @@ class SedeWebController extends BaseWebController
     public function importar(Request $req): void
     {
         if (empty($_FILES['file']['tmp_name'])) {
-            Response::error('Debe subir un archivo CSV', 400);
+            Response::error('Debe subir un archivo Excel', 400);
         }
 
         $filePath = $_FILES['file']['tmp_name'];
 
-        $delim = ',';
-        $fileHandle = fopen($filePath, 'r');
-        if ($fileHandle) {
-            $firstLine = fgets($fileHandle);
-            if (strpos($firstLine, ';') !== false) {
-                $delim = ';';
+        try {
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($filePath);
+            $sheet = $spreadsheet->getActiveSheet();
+            $rows = $sheet->toArray(null, true, true, true);
+        } catch (\Exception $e) {
+            Response::error('El archivo no pudo leerse como Excel: ' . $e->getMessage(), 400);
+        }
+
+        if (empty($rows)) {
+            Response::error('Archivo vacío', 400);
+        }
+
+        // Get headers from first row
+        $headerRow = array_shift($rows);
+        $headers = [];
+        foreach ($headerRow as $col => $val) {
+            if ($val !== null && trim((string)$val) !== '') {
+                $headers[$col] = trim((string)$val);
             }
-            rewind($fileHandle);
         }
 
-        $headers = fgetcsv($fileHandle, 1000, $delim);
-        if (!$headers) {
-            fclose($fileHandle);
-            Response::error('Archivo vacío o inválido', 400);
+        if (empty($headers)) {
+            Response::error('Cabeceras inválidas o vacías', 400);
         }
-
-        // Clean UTF-8 BOM if present
-        $headers[0] = preg_replace('/[\x{00EF}\x{00BB}\x{00BF}]/u', '', $headers[0]);
-        $headers = array_map('trim', $headers);
 
         $totalProcesados = 0;
         $exitosos = 0;
         $errores = [];
 
-        while (($row = fgetcsv($fileHandle, 1000, $delim)) !== false) {
-            $totalProcesados++;
-
-            // Pad row if it has fewer elements than headers
-            if (count($row) < count($headers)) {
-                $row = array_pad($row, count($headers), '');
+        foreach ($rows as $rowIndex => $row) {
+            // Check if row is empty
+            $rowEmpty = true;
+            foreach ($headers as $col => $header) {
+                if (isset($row[$col]) && trim((string)$row[$col]) !== '') {
+                    $rowEmpty = false;
+                    break;
+                }
+            }
+            if ($rowEmpty) {
+                continue; // Skip empty rows
             }
 
-            $data = array_combine($headers, array_slice(array_map('trim', $row), 0, count($headers)));
+            $totalProcesados++;
+
+            $data = [];
+            foreach ($headers as $col => $header) {
+                $data[$header] = isset($row[$col]) ? trim((string)$row[$col]) : '';
+            }
 
             $codigo = $data['codigo'] ?? '';
             $nombre = $data['nombre'] ?? '';
             $direccion = $data['direccion'] ?? '';
-            $latitud = isset($data['latitud']) ? floatval($data['latitud']) : null;
-            $longitud = isset($data['longitud']) ? floatval($data['longitud']) : null;
-            $radio = isset($data['radio_metros']) ? intval($data['radio_metros']) : 100;
+            $latitud = (isset($data['latitud']) && $data['latitud'] !== '') ? floatval($data['latitud']) : null;
+            $longitud = (isset($data['longitud']) && $data['longitud'] !== '') ? floatval($data['longitud']) : null;
+            $radio = (isset($data['radio_metros']) && $data['radio_metros'] !== '') ? intval($data['radio_metros']) : 100;
 
             if (empty($codigo) || empty($nombre) || $latitud === null || $longitud === null) {
-                $errores[] = "Fila {$totalProcesados}: El código, nombre, latitud y longitud son requeridos.";
+                $errores[] = "Fila {$rowIndex}: El código, nombre, latitud y longitud son requeridos.";
                 continue;
             }
 
@@ -225,15 +240,46 @@ class SedeWebController extends BaseWebController
                 }
                 $exitosos++;
             } catch (\Exception $e) {
-                $errores[] = "Fila {$totalProcesados}: Error al guardar en base de datos. " . $e->getMessage();
+                $errores[] = "Fila {$rowIndex}: Error al guardar en base de datos. " . $e->getMessage();
             }
         }
-        fclose($fileHandle);
 
         Response::success([
             'total_procesados' => $totalProcesados,
             'exitosos' => $exitosos,
             'errores' => $errores
         ]);
+    }
+
+    /** GET /v1/web/sedes/import/template */
+    public function downloadTemplate(Request $req): void
+    {
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        
+        $headers = ['codigo', 'nombre', 'direccion', 'latitud', 'longitud', 'radio_metros'];
+        foreach ($headers as $colIndex => $header) {
+            $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
+            $sheet->setCellValue($colLetter . '1', $header);
+        }
+        
+        $example = ['SEDE-001', 'Sede Central', 'Av. Principal 123', -12.046373, -77.042754, 100];
+        foreach ($example as $colIndex => $val) {
+            $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
+            $sheet->setCellValue($colLetter . '2', $val);
+        }
+        
+        $sheet->getStyle('A1:F1')->getFont()->setBold(true);
+        foreach (range('A', 'F') as $colLetter) {
+            $sheet->getColumnDimension($colLetter)->setAutoSize(true);
+        }
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment;filename="plantilla_sedes.xlsx"');
+        header('Cache-Control: max-age=0');
+        
+        $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
+        $writer->save('php://output');
+        exit;
     }
 }

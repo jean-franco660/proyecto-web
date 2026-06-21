@@ -200,21 +200,136 @@ class AuthWebController
         Response::success(null, 'Sesión cerrada correctamente');
     }
 
+    /** PUT /v1/web/profile — actualizar perfil del usuario autenticado */
+    public function updateProfile(Request $req): void
+    {
+        $userId = (int) ($_REQUEST['auth_user']['sub'] ?? 0);
+        if (!$userId) {
+            Response::unauthorized('Usuario no autenticado');
+        }
+
+        $nombre = $req->input('nombre');
+        $email = $req->input('email');
+        $password = $req->input('password');
+        $currentPassword = $req->input('current_password');
+
+        $errors = [];
+        if ($nombre !== null && trim((string)$nombre) === '') {
+            $errors[] = 'El nombre no puede estar vacío';
+        }
+        if ($email !== null) {
+            $email = strtolower(trim((string)$email));
+            if ($email === '') {
+                $errors[] = 'El email no puede estar vacío';
+            } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $errors[] = 'Email inválido';
+            }
+        }
+        
+        $updatingPassword = ($password !== null && trim((string)$password) !== '');
+        
+        if ($updatingPassword) {
+            if (!\App\Core\Validator::isSecurePassword((string)$password)) {
+                $errors[] = 'La contraseña nueva debe tener al menos 8 caracteres y contener letras y números';
+            }
+            if ($currentPassword === null || trim((string)$currentPassword) === '') {
+                $errors[] = 'Debes ingresar tu contraseña actual para cambiarla';
+            }
+        }
+
+        if ($errors) {
+            Response::unprocessable('Datos inválidos', $errors);
+        }
+
+        // Obtener usuario actual
+        $user = $this->model->find($userId);
+        if (!$user) {
+            Response::notFound('Usuario no encontrado');
+        }
+
+        // Si se cambia la contraseña, validar contraseña actual
+        if ($updatingPassword) {
+            $stmt = $this->model->db()->prepare("SELECT password FROM usuarios WHERE id = ?");
+            $stmt->execute([$userId]);
+            $hash = $stmt->fetchColumn();
+            if (!$hash || !password_verify((string)$currentPassword, $hash)) {
+                Response::error('La contraseña actual es incorrecta', 422);
+            }
+        }
+
+        // Validar email único si cambió
+        if ($email !== null && $email !== strtolower($user['email'])) {
+            $stmt = $this->model->db()->prepare("SELECT id FROM usuarios WHERE email = ? AND id != ?");
+            $stmt->execute([$email, $userId]);
+            if ($stmt->fetch()) {
+                Response::error('El email ya está registrado por otro usuario', 422);
+            }
+        }
+
+        $this->model->db()->beginTransaction();
+        try {
+            // Actualizar tabla usuarios
+            $camposUser = [];
+            $paramsUser = [];
+            if ($email !== null) {
+                $camposUser[] = "`email` = ?";
+                $paramsUser[] = $email;
+            }
+            if ($updatingPassword) {
+                $camposUser[] = "`password` = ?";
+                $paramsUser[] = password_hash((string)$password, PASSWORD_BCRYPT);
+            }
+            if ($camposUser) {
+                $paramsUser[] = $userId;
+                $stmt = $this->model->db()->prepare("UPDATE usuarios SET " . implode(', ', $camposUser) . " WHERE id = ?");
+                $stmt->execute($paramsUser);
+            }
+
+            // Actualizar tabla usuarios_staff
+            if ($nombre !== null) {
+                $stmt = $this->model->db()->prepare("
+                    INSERT INTO usuarios_staff (usuario_id, nombre) VALUES (?, ?)
+                    ON DUPLICATE KEY UPDATE nombre = VALUES(nombre)
+                ");
+                $stmt->execute([$userId, trim((string)$nombre)]);
+            }
+
+            $this->model->db()->commit();
+            Response::success(null, 'Perfil actualizado correctamente');
+        } catch (\Exception $e) {
+            if ($this->model->db()->inTransaction()) {
+                $this->model->db()->rollBack();
+            }
+            error_log('[AuthWebController::updateProfile] Error: ' . $e->getMessage());
+            Response::error('Error al actualizar el perfil. Intente nuevamente.', 500);
+        }
+    }
+
     private function send2FACodeEmail(string $toEmail, string $code): void
     {
         $mail = new PHPMailer(true);
         try {
             // Configuración del servidor SMTP
             $mail->isSMTP();
-            $mail->Host       = $_ENV['SMTP_HOST'] ?? 'smtp.gmail.com';
+            $mail->Host       = $_ENV['MAIL_HOST'] ?? 'smtp.gmail.com';
             $mail->SMTPAuth   = true;
-            $mail->Username   = $_ENV['SMTP_USER'] ?? 'tu-correo@gmail.com';
-            $mail->Password   = $_ENV['SMTP_PASS'] ?? 'tu-password-de-aplicacion';
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port       = $_ENV['SMTP_PORT'] ?? 587;
+            $mail->Username   = $_ENV['MAIL_USERNAME'] ?? 'tu-correo@gmail.com';
+            $mail->Password   = $_ENV['MAIL_PASSWORD'] ?? 'tu-password-de-aplicacion';
+            $mail->Port       = (int)($_ENV['MAIL_PORT'] ?? 587);
+
+            $encryption = $_ENV['MAIL_ENCRYPTION'] ?? '';
+            if (strtolower($encryption) === 'ssl') {
+                $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+            } elseif (strtolower($encryption) === 'tls') {
+                $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+            } else {
+                $mail->SMTPSecure = '';
+            }
 
             // Remitente y destinatario
-            $mail->setFrom($mail->Username, 'Sistema de Asistencia');
+            $fromAddress = $_ENV['MAIL_FROM_ADDRESS'] ?? $mail->Username;
+            $fromName    = $_ENV['MAIL_FROM_NAME'] ?? 'Sistema de Asistencia';
+            $mail->setFrom($fromAddress, $fromName);
             $mail->addAddress($toEmail);
 
             // Contenido
@@ -242,3 +357,4 @@ class AuthWebController
         }
     }
 }
+

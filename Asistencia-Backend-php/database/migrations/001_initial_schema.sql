@@ -284,4 +284,19 @@ INSERT INTO departamentos (nombre, descripcion) VALUES
 ('Operaciones', 'Área operativa y logística')
 ON DUPLICATE KEY UPDATE nombre = VALUES(nombre), descripcion = VALUES(descripcion);
 
+CREATE TABLE IF NOT EXISTS feriados (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    fecha DATE NOT NULL UNIQUE,
+    nombre VARCHAR(150) NOT NULL,
+    tipo ENUM('NACIONAL', 'LOCAL', 'EMPRESA') NOT NULL DEFAULT 'NACIONAL',
+    sede_id INT UNSIGNED NULL,
+    activo TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX (fecha),
+    INDEX (activo),
+    FOREIGN KEY (sede_id) REFERENCES sedes(id) ON DELETE SET NULL
+);
+
 SET FOREIGN_KEY_CHECKS = 1;
+

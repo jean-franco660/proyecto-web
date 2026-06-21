@@ -353,5 +353,20 @@ INSERT INTO departamentos (nombre, descripcion) VALUES
 ('Tecnología de Información', 'Soporte y desarrollo de sistemas'),
 ('Operaciones', 'Área operativa y logística');
 
+CREATE TABLE feriados (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    fecha DATE NOT NULL UNIQUE,
+    nombre VARCHAR(150) NOT NULL,
+    tipo ENUM('NACIONAL', 'LOCAL', 'EMPRESA') NOT NULL DEFAULT 'NACIONAL',
+    sede_id INT UNSIGNED NULL,
+    activo TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX (fecha),
+    INDEX (activo),
+    FOREIGN KEY (sede_id) REFERENCES sedes(id) ON DELETE SET NULL
+);
+
 SET FOREIGN_KEY_CHECKS = 1;
+
 

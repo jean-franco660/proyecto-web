@@ -105,7 +105,7 @@
     <div v-if="isImportModalOpen" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl flex flex-col">
         <div class="flex justify-between items-center pb-3 border-b border-slate-100">
-          <h3 class="text-lg font-bold text-slate-800">Importar Sedes desde Excel (CSV)</h3>
+          <h3 class="text-lg font-bold text-slate-800">Importar Sedes desde Excel (.xlsx)</h3>
           <button @click="isImportModalOpen = false" class="text-slate-400 hover:text-slate-600">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
@@ -113,14 +113,20 @@
 
         <div class="py-4 space-y-4 flex-1">
           <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
-            <p class="font-bold">Estructura requerida del archivo CSV:</p>
-            <p class="font-mono bg-white p-1.5 rounded border border-slate-100 overflow-x-auto select-all">codigo,nombre,direccion,latitud,longitud,radio_metros</p>
-            <p class="mt-1">* Nota: Guarda tu hoja de cálculo Excel en formato CSV (delimitado por comas o punto y coma) antes de subir.</p>
+            <p class="font-bold">Estructura requerida de las columnas de Excel:</p>
+            <p class="font-mono bg-white p-1.5 rounded border border-slate-100 overflow-x-auto select-all">codigo, nombre, direccion, latitud, longitud, radio_metros</p>
+            <p class="mt-1">* Nota: Se recomienda descargar la plantilla estructurada para evitar errores de importación.</p>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Seleccionar archivo</label>
-            <input type="file" ref="fileInput" accept=".csv" class="input-field py-1.5 text-sm">
+            <div class="flex justify-between items-center mb-1">
+              <label class="block text-sm font-medium text-slate-700">Seleccionar archivo Excel</label>
+              <button @click="downloadTemplate" type="button" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center space-x-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                <span>Descargar Plantilla (.xlsx)</span>
+              </button>
+            </div>
+            <input type="file" ref="fileInput" accept=".xlsx" class="input-field py-1.5 text-sm">
           </div>
 
           <!-- Resultados de importación -->
@@ -309,6 +315,24 @@ const uploadFile = async () => {
     alert(err.response?.data?.error || 'Error al importar sedes')
   } finally {
     importing.value = false
+  }
+}
+
+const downloadTemplate = async () => {
+  try {
+    const response = await api.get('/v1/web/sedes/import/template', {
+      responseType: 'blob'
+    })
+    const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', 'plantilla_sedes.xlsx')
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  } catch (err) {
+    alert('Error al descargar la plantilla')
   }
 }
 

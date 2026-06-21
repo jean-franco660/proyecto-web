@@ -127,6 +127,9 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import api from '@/api/axios'
+import { useAuthStore } from '@/store/auth'
+
+const authStore = useAuthStore()
 
 const horarios = ref([])
 const sedesList = ref([])

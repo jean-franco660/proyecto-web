@@ -94,7 +94,8 @@ class UsuarioAppController extends BaseWebController
                    CONCAT(IFNULL(ut.nombres,''), ' ', IFNULL(ut.apellidos,'')) AS nombre_completo,
                    ut.nombres, ut.apellidos,
                    ut.dni, eu.nombre AS estado,
-                   u.estado_id
+                   u.estado_id,
+                   d.id AS departamento_id, d.nombre AS departamento_nombre
             FROM usuarios u
             LEFT JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
             INNER JOIN estados_usuario eu ON eu.id = u.estado_id
@@ -164,10 +165,12 @@ class UsuarioAppController extends BaseWebController
                    CONCAT(IFNULL(ut.nombres,''), ' ', IFNULL(ut.apellidos,'')) AS nombre_completo,
                    ut.nombres, ut.apellidos,
                    ut.dni, ut.telefono, eu.nombre AS estado,
-                   u.estado_id
+                   u.estado_id,
+                   d.id AS departamento_id, d.nombre AS departamento_nombre
             FROM usuarios u
             LEFT JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
             INNER JOIN estados_usuario eu ON eu.id = u.estado_id
+            LEFT JOIN departamentos d ON d.id = ut.departamento_id
             INNER JOIN usuario_roles ur ON ur.usuario_id = u.id
             INNER JOIN roles r ON r.id = ur.rol_id
             WHERE u.id = :id AND r.nombre = 'TRABAJADOR'
@@ -282,10 +285,11 @@ class UsuarioAppController extends BaseWebController
                 ->execute([$userId]);
 
             // Crear perfil de trabajador
+            $departamentoId = $req->input('departamento_id') ? (int)$req->input('departamento_id') : null;
             $this->db->prepare("
-                INSERT INTO usuarios_trabajador (usuario_id, nombres, apellidos, dni, telefono)
-                VALUES (?, ?, ?, ?, ?)
-            ")->execute([$userId, $nombres, $apellidos, $dni ?: null, $telefono ?: null]);
+                INSERT INTO usuarios_trabajador (usuario_id, nombres, apellidos, dni, telefono, departamento_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ")->execute([$userId, $nombres, $apellidos, $dni ?: null, $telefono ?: null, $departamentoId]);
 
             // Crear asignaciones a sedes
             $asignaciones = $req->input('asignaciones', []);
@@ -403,6 +407,11 @@ class UsuarioAppController extends BaseWebController
             if ($telefono !== null) {
                 $camposPerfil[] = "`telefono` = ?";
                 $paramsPerfil[] = $telefono;
+            }
+            $departamentoId = $req->input('departamento_id');
+            if ($departamentoId !== null) {
+                $camposPerfil[] = "`departamento_id` = ?";
+                $paramsPerfil[] = $departamentoId !== '' ? (int)$departamentoId : null;
             }
 
             if ($camposPerfil) {
@@ -616,58 +625,94 @@ class UsuarioAppController extends BaseWebController
     public function importar(Request $req): void
     {
         if (empty($_FILES['file']['tmp_name'])) {
-            Response::error('Debe subir un archivo CSV', 400);
+            Response::error('Debe subir un archivo Excel', 400);
         }
 
         $filePath = $_FILES['file']['tmp_name'];
 
-        $delim = ',';
-        $fileHandle = fopen($filePath, 'r');
-        if ($fileHandle) {
-            $firstLine = fgets($fileHandle);
-            if (strpos($firstLine, ';') !== false) {
-                $delim = ';';
+        try {
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($filePath);
+            $sheet = $spreadsheet->getActiveSheet();
+            $rows = $sheet->toArray(null, true, true, true);
+        } catch (\Exception $e) {
+            Response::error('El archivo no pudo leerse como Excel: ' . $e->getMessage(), 400);
+        }
+
+        if (empty($rows)) {
+            Response::error('Archivo vacío', 400);
+        }
+
+        // Si es supervisor, pre-cargar sus sedes permitidas (código => id)
+        $esSupervisor = ($this->rol() === 'supervisor');
+        $sedesPermitidas = [];
+        if ($esSupervisor) {
+            $misSedeIds = $this->sedesDelSupervisor();
+            if (empty($misSedeIds)) {
+                Response::error('No tienes sedes asignadas para realizar importaciones.', 403);
             }
-            rewind($fileHandle);
+            $in = implode(',', array_map('intval', $misSedeIds));
+            $stmtSedesCodigo = $this->db->query("SELECT id, codigo FROM sedes WHERE id IN ({$in})");
+            foreach ($stmtSedesCodigo->fetchAll(\PDO::FETCH_ASSOC) as $s) {
+                $sedesPermitidas[$s['codigo']] = (int)$s['id'];
+            }
         }
 
-        $headers = fgetcsv($fileHandle, 1000, $delim);
-        if (!$headers) {
-            fclose($fileHandle);
-            Response::error('Archivo vacío o inválido', 400);
+        // Leer cabeceras desde la primera fila
+        $headerRow = array_shift($rows);
+        $headers = [];
+        foreach ($headerRow as $col => $val) {
+            if ($val !== null && trim((string)$val) !== '') {
+                $headers[$col] = trim((string)$val);
+            }
         }
 
-        $headers[0] = preg_replace('/[\x{00EF}\x{00BB}\x{00BF}]/u', '', $headers[0]);
-        $headers = array_map('trim', $headers);
+        if (empty($headers)) {
+            Response::error('Cabeceras inválidas o vacías', 400);
+        }
 
         $totalProcesados = 0;
         $exitosos = 0;
         $errores = [];
 
-        while (($row = fgetcsv($fileHandle, 1000, $delim)) !== false) {
-            $totalProcesados++;
-
-            // Pad row if it has fewer elements than headers
-            if (count($row) < count($headers)) {
-                $row = array_pad($row, count($headers), '');
+        foreach ($rows as $rowIndex => $row) {
+            $rowEmpty = true;
+            foreach ($headers as $col => $header) {
+                if (isset($row[$col]) && trim((string)$row[$col]) !== '') {
+                    $rowEmpty = false;
+                    break;
+                }
+            }
+            if ($rowEmpty) {
+                continue;
             }
 
-            $data = array_combine($headers, array_slice(array_map('trim', $row), 0, count($headers)));
+            $totalProcesados++;
 
-            $codigo = $data['codigo_empleado'] ?? '';
-            $nombres = $data['nombres'] ?? '';
-            $apellidos = $data['apellidos'] ?? '';
-            $dni = $data['dni'] ?? '';
-            $email = isset($data['email']) ? strtolower(trim($data['email'])) : '';
-            $telefono = $data['telefono'] ?? '';
-            $password = $data['password'] ?? '';
-            $cargo = $data['cargo'] ?? 'DOCENTE';
-            $condicion = $data['condicion_laboral'] ?? '';
-            $sedeCodigo = $data['sede_codigo'] ?? '';
+            $data = [];
+            foreach ($headers as $col => $header) {
+                $data[$header] = isset($row[$col]) ? trim((string)$row[$col]) : '';
+            }
+
+            $codigo        = $data['codigo_empleado'] ?? '';
+            $nombres       = $data['nombres'] ?? '';
+            $apellidos     = $data['apellidos'] ?? '';
+            $dni           = $data['dni'] ?? '';
+            $email         = isset($data['email']) ? strtolower(trim((string)$data['email'])) : '';
+            $telefono      = $data['telefono'] ?? '';
+            $password      = $data['password'] ?? '';
+            $cargo         = $data['cargo'] ?? 'DOCENTE';
+            $condicion     = $data['condicion_laboral'] ?? '';
+            $sedeCodigo    = $data['sede_codigo'] ?? '';
             $horarioNombre = $data['horario_nombre'] ?? '';
 
             if (empty($codigo) || empty($nombres) || empty($apellidos) || empty($dni)) {
-                $errores[] = "Fila {$totalProcesados}: El código_empleado, nombres, apellidos y DNI son obligatorios.";
+                $errores[] = "Fila {$rowIndex}: código_empleado, nombres, apellidos y DNI son obligatorios.";
+                continue;
+            }
+
+            // Supervisor: validar que la sede del Excel le pertenezca
+            if ($esSupervisor && !empty($sedeCodigo) && !isset($sedesPermitidas[$sedeCodigo])) {
+                $errores[] = "Fila {$rowIndex}: No tienes permiso para asignar trabajadores a la sede '{$sedeCodigo}'.";
                 continue;
             }
 
@@ -677,63 +722,77 @@ class UsuarioAppController extends BaseWebController
 
             $this->db->beginTransaction();
             try {
-                // Check if user exists by employee code or email
                 $stmt = $this->db->prepare("SELECT id FROM usuarios WHERE codigo_empleado = ? OR email = ?");
                 $stmt->execute([$codigo, $email]);
                 $existingUser = $stmt->fetch();
 
                 if ($existingUser) {
                     $userId = $existingUser['id'];
-                    // Update user profile
-                    $stmtUpPerfil = $this->db->prepare("
+
+                    // Supervisor: verificar que el trabajador existente sea de sus sedes
+                    if ($esSupervisor) {
+                        $inSup = implode(',', array_values($sedesPermitidas));
+                        $stmtChk = $this->db->prepare("
+                            SELECT 1 FROM usuario_sede
+                            WHERE usuario_id = ? AND sede_id IN ({$inSup})
+                              AND estado = 1 AND (fecha_fin IS NULL OR fecha_fin >= CURDATE())
+                        ");
+                        $stmtChk->execute([$userId]);
+                        if (!$stmtChk->fetch()) {
+                            $this->db->rollBack();
+                            $errores[] = "Fila {$rowIndex}: El trabajador '{$codigo}' no pertenece a tus sedes asignadas.";
+                            continue;
+                        }
+                    }
+
+                    $this->db->prepare("
                         UPDATE usuarios_trabajador 
                         SET nombres = ?, apellidos = ?, DNI = ?, telefono = ? 
                         WHERE usuario_id = ?
-                    ");
-                    $stmtUpPerfil->execute([$nombres, $apellidos, $dni, $telefono ?: null, $userId]);
+                    ")->execute([$nombres, $apellidos, $dni, $telefono ?: null, $userId]);
 
                     if (!empty($password)) {
-                        $hash = password_hash($password, PASSWORD_BCRYPT);
-                        $this->db->prepare("UPDATE usuarios SET password = ? WHERE id = ?")->execute([$hash, $userId]);
+                        $this->db->prepare("UPDATE usuarios SET password = ? WHERE id = ?")
+                            ->execute([password_hash($password, PASSWORD_BCRYPT), $userId]);
                     }
                 } else {
-                    // Create base user (estado_id=1 -> ACTIVO)
-                    $pw = $password ? password_hash($password, PASSWORD_BCRYPT) : password_hash($dni ?: $codigo, PASSWORD_BCRYPT);
-                    $stmtInsertUser = $this->db->prepare("
-                        INSERT INTO usuarios (email, codigo_empleado, password, estado_id) 
-                        VALUES (?, ?, ?, 1)
-                    ");
-                    $stmtInsertUser->execute([$email, $codigo, $pw]);
+                    $pw = $password
+                        ? password_hash($password, PASSWORD_BCRYPT)
+                        : password_hash($dni ?: $codigo, PASSWORD_BCRYPT);
+
+                    $this->db->prepare("
+                        INSERT INTO usuarios (email, codigo_empleado, password, estado_id) VALUES (?, ?, ?, 1)
+                    ")->execute([$email, $codigo, $pw]);
                     $userId = (int) $this->db->lastInsertId();
 
-                    // Assign role TRABAJADOR (id=3)
                     $this->db->prepare("INSERT INTO usuario_roles (usuario_id, rol_id) VALUES (?, 3)")
                         ->execute([$userId]);
 
-                    // Create worker profile
-                    $stmtInsertPerfil = $this->db->prepare("
+                    $this->db->prepare("
                         INSERT INTO usuarios_trabajador (usuario_id, nombres, apellidos, dni, telefono) 
                         VALUES (?, ?, ?, ?, ?)
-                    ");
-                    $stmtInsertPerfil->execute([$userId, $nombres, $apellidos, $dni, $telefono ?: null]);
+                    ")->execute([$userId, $nombres, $apellidos, $dni, $telefono ?: null]);
                 }
 
-                // Sede & Horario assignment
+                // Asignación de Sede & Horario
                 if (!empty($sedeCodigo)) {
-                    $stmtSede = $this->db->prepare("SELECT id FROM sedes WHERE codigo = ?");
-                    $stmtSede->execute([$sedeCodigo]);
-                    $sede = $stmtSede->fetch();
+                    if ($esSupervisor) {
+                        $sedeId = $sedesPermitidas[$sedeCodigo] ?? null;
+                    } else {
+                        $stmtSede = $this->db->prepare("SELECT id FROM sedes WHERE codigo = ?");
+                        $stmtSede->execute([$sedeCodigo]);
+                        $sedeRow = $stmtSede->fetch();
+                        $sedeId = $sedeRow ? (int)$sedeRow['id'] : null;
+                    }
 
-                    if ($sede) {
-                        $sedeId = $sede['id'];
+                    if ($sedeId) {
                         $horarioId = null;
-
                         if (!empty($horarioNombre)) {
                             $stmtHorario = $this->db->prepare("SELECT id FROM horarios_sede WHERE sede_id = ? AND nombre = ?");
                             $stmtHorario->execute([$sedeId, $horarioNombre]);
                             $horario = $stmtHorario->fetch();
                             if ($horario) {
-                                $horarioId = $horario['id'];
+                                $horarioId = (int)$horario['id'];
                             }
                         }
 
@@ -749,11 +808,10 @@ class UsuarioAppController extends BaseWebController
                                     WHERE usuario_id = ? AND estado = 1
                                 ")->execute([$userId]);
 
-                                $stmtAsig = $this->db->prepare("
+                                $this->db->prepare("
                                     INSERT INTO usuario_sede (usuario_id, sede_id, horario_id, fecha_inicio, estado) 
                                     VALUES (?, ?, ?, CURDATE(), 1)
-                                ");
-                                $stmtAsig->execute([$userId, $sedeId, $horarioId]);
+                                ")->execute([$userId, $sedeId, $horarioId]);
                             }
                         }
                     }
@@ -763,15 +821,54 @@ class UsuarioAppController extends BaseWebController
                 $exitosos++;
             } catch (\Exception $e) {
                 $this->db->rollBack();
-                $errores[] = "Fila {$totalProcesados}: " . $e->getMessage();
+                $errores[] = "Fila {$rowIndex}: " . $e->getMessage();
             }
         }
-        fclose($fileHandle);
 
         Response::success([
             'total_procesados' => $totalProcesados,
-            'exitosos' => $exitosos,
-            'errores' => $errores
+            'exitosos'         => $exitosos,
+            'errores'          => $errores
         ]);
+    }
+
+    /** GET /v1/web/usuarios-app/import/template */
+    public function downloadTemplate(Request $req): void
+    {
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        
+        $headers = [
+            'codigo_empleado', 'nombres', 'apellidos', 'dni', 'email', 
+            'telefono', 'password', 'cargo', 'condicion_laboral', 
+            'sede_codigo', 'horario_nombre'
+        ];
+        foreach ($headers as $colIndex => $header) {
+            $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
+            $sheet->setCellValue($colLetter . '1', $header);
+        }
+        
+        $example = [
+            'EMP-001', 'Juan', 'Perez Garcia', '12345678', 'juan.perez@empresa.com', 
+            '987654321', 'password123', 'DOCENTE', 'Nombrado', 
+            'SEDE-001', 'Horario General'
+        ];
+        foreach ($example as $colIndex => $val) {
+            $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex + 1);
+            $sheet->setCellValue($colLetter . '2', $val);
+        }
+        
+        $sheet->getStyle('A1:K1')->getFont()->setBold(true);
+        foreach (range('A', 'K') as $colLetter) {
+            $sheet->getColumnDimension($colLetter)->setAutoSize(true);
+        }
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment;filename="plantilla_trabajadores.xlsx"');
+        header('Cache-Control: max-age=0');
+        
+        $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
+        $writer->save('php://output');
+        exit;
     }
 }
