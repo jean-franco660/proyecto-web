@@ -28,20 +28,23 @@ class JustificacionAppController extends BaseAppController
         $errors = [];
         $hoy = date('Y-m-d');
 
-        if (!$fInicio)
+        if (!$fInicio) {
             $errors[] = 'fecha_inicio es requerida';
-        elseif (!$this->esFechaValida($fInicio))
+        } elseif (!$this->esFechaValida($fInicio)) {
             $errors[] = 'fecha_inicio formato inválido (Y-m-d)';
-        elseif ($fInicio > $hoy)
-            $errors[] = 'fecha_inicio no puede ser futura'; 
+        } elseif ($fInicio > $hoy) {
+            $errors[] = 'fecha_inicio no puede ser futura';
+        }
 
-        if (!$fFin)
+        if (!$fFin) {
             $errors[] = 'fecha_fin es requerida';
-        elseif (!$this->esFechaValida($fFin))
+        } elseif (!$this->esFechaValida($fFin)) {
             $errors[] = 'fecha_fin formato inválido (Y-m-d)';
+        }
 
-        if ($fInicio && $fFin && $fFin < $fInicio)
+        if ($fInicio && $fFin && $fFin < $fInicio) {
             $errors[] = 'fecha_fin debe ser mayor o igual a fecha_inicio';
+        }
 
         return $errors;
     }
@@ -76,11 +79,13 @@ class JustificacionAppController extends BaseAppController
 
         $errors = array_merge($errors, $this->validarFechas($fInicio, $fFin));
 
-        if (!$motivo)
+        if (!$motivo) {
             $errors[] = 'motivo es requerido';
+        }
 
-        if ($errors)
+        if ($errors) {
             Response::unprocessable('Datos incompletos', $errors);
+        }
 
         try {
             $this->db->beginTransaction();
@@ -106,7 +111,6 @@ class JustificacionAppController extends BaseAppController
                 'Justificación enviada. Pendiente de revisión.',
                 201
             );
-
         } catch (\Exception $e) {
             $this->db->rollBack();
             Response::error('Error al guardar la justificación', 500);
@@ -128,8 +132,9 @@ class JustificacionAppController extends BaseAppController
         $stmt->execute([':id' => $id, ':uid' => $this->userId()]);
         $just = $stmt->fetch();
 
-        if (!$just)
+        if (!$just) {
             Response::notFound('Justificación no encontrada');
+        }
 
         Response::success($just);
     }
@@ -151,10 +156,12 @@ class JustificacionAppController extends BaseAppController
         $stmt->execute([':id' => $id, ':uid' => $uid]);
         $just = $stmt->fetch();
 
-        if (!$just)
+        if (!$just) {
             Response::notFound('Justificación no encontrada');
-        if ($just['estado_nombre'] !== 'PENDIENTE')
+        }
+        if ($just['estado_nombre'] !== 'PENDIENTE') {
             Response::error('Solo se pueden eliminar justificaciones pendientes', 400);
+        }
 
         try {
             $this->db->beginTransaction();

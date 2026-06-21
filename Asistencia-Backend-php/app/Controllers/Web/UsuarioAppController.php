@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Controllers\Web;
 
 use App\Core\Request;
@@ -81,7 +82,9 @@ class UsuarioAppController extends BaseWebController
             INNER JOIN estados_usuario eu ON eu.id = u.estado_id
             WHERE {$whereClause}
         ");
-        foreach ($params as $k => $v) $stmtCount->bindValue($k, $v);
+        foreach ($params as $k => $v) {
+            $stmtCount->bindValue($k, $v);
+        }
         $stmtCount->execute();
         $total = (int) $stmtCount->fetchColumn();
 
@@ -99,11 +102,13 @@ class UsuarioAppController extends BaseWebController
             ORDER BY ut.apellidos, ut.nombres
             LIMIT :limit OFFSET :offset
         ";
-        
+
         $stmt = $this->db->prepare($sql);
         $stmt->bindValue(':limit', $perPage, \PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, \PDO::PARAM_INT);
-        foreach ($params as $k => $v) $stmt->bindValue($k, $v);
+        foreach ($params as $k => $v) {
+            $stmt->bindValue($k, $v);
+        }
         $stmt->execute();
         $users = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
@@ -169,7 +174,9 @@ class UsuarioAppController extends BaseWebController
         ");
         $stmt->execute([':id' => $id]);
         $u = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if (!$u) Response::notFound('Trabajador no encontrado');
+        if (!$u) {
+            Response::notFound('Trabajador no encontrado');
+        }
 
         if ($this->rol() === 'supervisor') {
             $misSedes = $this->sedesDelSupervisor();
@@ -187,7 +194,7 @@ class UsuarioAppController extends BaseWebController
                 Response::error('Sin acceso a este trabajador', 403);
             }
         }
-        
+
         $stmtSedes = $this->db->prepare("
             SELECT s.id, s.nombre, s.codigo,
                    us.estado, us.fecha_inicio, us.fecha_fin, us.id AS pivot_id,
@@ -230,18 +237,30 @@ class UsuarioAppController extends BaseWebController
         $password   = (string) $req->input('password');
 
         $errors = [];
-        if (!$nombres)   $errors[] = 'nombres es requerido';
-        if (!$apellidos) $errors[] = 'apellidos es requerido';
-        if (!$codigo)    $errors[] = 'codigo_modular es requerido';
-        if ($errors) Response::unprocessable('Datos incompletos', $errors);
+        if (!$nombres) {
+            $errors[] = 'nombres es requerido';
+        }
+        if (!$apellidos) {
+            $errors[] = 'apellidos es requerido';
+        }
+        if (!$codigo) {
+            $errors[] = 'codigo_modular es requerido';
+        }
+        if ($errors) {
+            Response::unprocessable('Datos incompletos', $errors);
+        }
 
         // Si no hay email, generar uno basado en código
-        if (!$email) $email = $codigo . '@asistencia.local';
+        if (!$email) {
+            $email = $codigo . '@asistencia.local';
+        }
 
         // Verificar unicidad en tabla usuarios
         $stmt = $this->db->prepare("SELECT id FROM usuarios WHERE email = ? OR codigo_empleado = ?");
         $stmt->execute([$email, $codigo]);
-        if ($stmt->fetch(\PDO::FETCH_ASSOC)) Response::error('El email o código ya existe', 422);
+        if ($stmt->fetch(\PDO::FETCH_ASSOC)) {
+            Response::error('El email o código ya existe', 422);
+        }
 
         $this->db->beginTransaction();
         try {
@@ -278,7 +297,9 @@ class UsuarioAppController extends BaseWebController
                 foreach ($asignaciones as $asig) {
                     $sedeId = (int)($asig['institucion_id'] ?? 0);
                     $horarioId = (int)($asig['horario_id'] ?? 0);
-                    if (!$sedeId || !$horarioId) continue;
+                    if (!$sedeId || !$horarioId) {
+                        continue;
+                    }
                     $stmtAsig->execute([
                         $userId,
                         $sedeId,
@@ -311,11 +332,15 @@ class UsuarioAppController extends BaseWebController
             WHERE u.id = ? AND r.nombre = 'TRABAJADOR'
         ");
         $stmt->execute([$id]);
-        if (!$stmt->fetch(\PDO::FETCH_ASSOC)) Response::notFound('Trabajador no encontrado');
+        if (!$stmt->fetch(\PDO::FETCH_ASSOC)) {
+            Response::notFound('Trabajador no encontrado');
+        }
 
         if ($this->rol() === 'supervisor') {
             $misSedes = $this->sedesDelSupervisor();
-            if (empty($misSedes)) Response::error('Sin acceso a este trabajador', 403);
+            if (empty($misSedes)) {
+                Response::error('Sin acceso a este trabajador', 403);
+            }
             $in = implode(',', array_map('intval', $misSedes));
             $stmtChk = $this->db->prepare("
                 SELECT 1 FROM usuario_sede
@@ -337,8 +362,14 @@ class UsuarioAppController extends BaseWebController
             $email  = $req->input('email');
             $pass   = $req->input('password');
 
-            if ($codigo !== null) { $camposUser[] = "`codigo_empleado` = ?"; $paramsUser[] = $codigo; }
-            if ($email !== null)  { $camposUser[] = "`email` = ?"; $paramsUser[] = strtolower(trim($email)); }
+            if ($codigo !== null) {
+                $camposUser[] = "`codigo_empleado` = ?";
+                $paramsUser[] = $codigo;
+            }
+            if ($email !== null) {
+                $camposUser[] = "`email` = ?";
+                $paramsUser[] = strtolower(trim($email));
+            }
             if ($pass !== null && trim($pass) !== '') {
                 $camposUser[] = "`password` = ?";
                 $paramsUser[] = password_hash($pass, PASSWORD_BCRYPT);
@@ -357,10 +388,22 @@ class UsuarioAppController extends BaseWebController
             $dni       = $req->input('dni');
             $telefono  = $req->input('telefono');
 
-            if ($nombres !== null)   { $camposPerfil[] = "`nombres` = ?"; $paramsPerfil[] = $nombres; }
-            if ($apellidos !== null)  { $camposPerfil[] = "`apellidos` = ?"; $paramsPerfil[] = $apellidos; }
-            if ($dni !== null)       { $camposPerfil[] = "`dni` = ?"; $paramsPerfil[] = $dni; }
-            if ($telefono !== null)  { $camposPerfil[] = "`telefono` = ?"; $paramsPerfil[] = $telefono; }
+            if ($nombres !== null) {
+                $camposPerfil[] = "`nombres` = ?";
+                $paramsPerfil[] = $nombres;
+            }
+            if ($apellidos !== null) {
+                $camposPerfil[] = "`apellidos` = ?";
+                $paramsPerfil[] = $apellidos;
+            }
+            if ($dni !== null) {
+                $camposPerfil[] = "`dni` = ?";
+                $paramsPerfil[] = $dni;
+            }
+            if ($telefono !== null) {
+                $camposPerfil[] = "`telefono` = ?";
+                $paramsPerfil[] = $telefono;
+            }
 
             if ($camposPerfil) {
                 $paramsPerfil[] = $id;
@@ -378,7 +421,9 @@ class UsuarioAppController extends BaseWebController
                 foreach ($asignaciones as $asig) {
                     $sedeId = (int)($asig['institucion_id'] ?? 0);
                     $horarioId = (int)($asig['horario_id'] ?? 0);
-                    if (!$sedeId || !$horarioId) continue;
+                    if (!$sedeId || !$horarioId) {
+                        continue;
+                    }
                     $stmtAsig->execute([
                         $id,
                         $sedeId,
@@ -406,8 +451,9 @@ class UsuarioAppController extends BaseWebController
 
         $estadoMap = ['ACTIVO' => 1, 'INACTIVO' => 2, 'BLOQUEADO' => 3];
         $estadoId = $estadoMap[$estado] ?? null;
-        if (!$estadoId)
+        if (!$estadoId) {
             Response::unprocessable('Estado inválido. Use ACTIVO, INACTIVO o BLOQUEADO');
+        }
 
         $stmt = $this->db->prepare("UPDATE usuarios SET estado_id = ? WHERE id = ?");
         $stmt->execute([$estadoId, $id]);
@@ -421,8 +467,12 @@ class UsuarioAppController extends BaseWebController
         $sedeId    = (int) $req->input('sede_id');
         $horarioId = (int) $req->input('horario_id');
 
-        if (!$sedeId) Response::unprocessable('sede_id es requerido');
-        if (!$horarioId) Response::unprocessable('horario_id es requerido');
+        if (!$sedeId) {
+            Response::unprocessable('sede_id es requerido');
+        }
+        if (!$horarioId) {
+            Response::unprocessable('horario_id es requerido');
+        }
 
         $this->db->beginTransaction();
         try {
@@ -482,7 +532,7 @@ class UsuarioAppController extends BaseWebController
     public function listarPasswordResets(Request $req): void
     {
         $estado = $req->query('estado', 'PENDIENTE');
-        
+
         $sql = "
             SELECT pra.id, pra.usuario_id, pra.estado, pra.created_at,
                    u.codigo_empleado, ut.nombres, ut.apellidos, ut.dni
@@ -492,7 +542,7 @@ class UsuarioAppController extends BaseWebController
             WHERE pra.estado = :estado
             ORDER BY pra.created_at DESC
         ";
-        
+
         $stmt = $this->db->prepare($sql);
         $stmt->execute([':estado' => $estado]);
         Response::success($stmt->fetchAll(\PDO::FETCH_ASSOC));
@@ -502,40 +552,39 @@ class UsuarioAppController extends BaseWebController
     public function aprobarPasswordReset(Request $req): void
     {
         $id = (int) $req->param('id');
-        
+
         $stmt = $this->db->prepare("SELECT * FROM password_resets_app WHERE id = ?");
         $stmt->execute([$id]);
         $reset = $stmt->fetch(\PDO::FETCH_ASSOC);
-        
+
         if (!$reset) {
             Response::notFound('Solicitud de recuperación no encontrada');
         }
         if ($reset['estado'] !== 'PENDIENTE') {
             Response::error('Esta solicitud ya fue procesada', 400);
         }
-        
+
         // Generar clave temporal de 6 dígitos
         $tempPassword = (string) rand(100000, 999999);
         $hash = password_hash($tempPassword, PASSWORD_BCRYPT);
-        
+
         $this->db->beginTransaction();
         try {
             // Actualizar estado de solicitud
             $this->db->prepare("UPDATE password_resets_app SET estado = 'APROBADA' WHERE id = ?")->execute([$id]);
-            
+
             // Actualizar contraseña del trabajador y forzar cambio
             $this->db->prepare("
                 UPDATE usuarios 
                 SET password = ?, debe_cambiar_password = 1 
                 WHERE id = ?
             ")->execute([$hash, $reset['usuario_id']]);
-            
+
             $this->db->commit();
-            
+
             Response::success([
                 'temp_password' => $tempPassword
             ], 'Solicitud aprobada. Proporcione la contraseña temporal al trabajador.');
-            
         } catch (\Exception $e) {
             $this->db->rollBack();
             error_log('[UsuarioAppController::aprobarPasswordReset] Error: ' . $e->getMessage());
@@ -547,18 +596,18 @@ class UsuarioAppController extends BaseWebController
     public function rechazarPasswordReset(Request $req): void
     {
         $id = (int) $req->param('id');
-        
+
         $stmt = $this->db->prepare("SELECT * FROM password_resets_app WHERE id = ?");
         $stmt->execute([$id]);
         $reset = $stmt->fetch(\PDO::FETCH_ASSOC);
-        
+
         if (!$reset) {
             Response::notFound('Solicitud de recuperación no encontrada');
         }
         if ($reset['estado'] !== 'PENDIENTE') {
             Response::error('Esta solicitud ya fue procesada', 400);
         }
-        
+
         $this->db->prepare("UPDATE password_resets_app SET estado = 'RECHAZADA' WHERE id = ?")->execute([$id]);
         Response::success(null, 'Solicitud rechazada correctamente');
     }
@@ -571,7 +620,7 @@ class UsuarioAppController extends BaseWebController
         }
 
         $filePath = $_FILES['file']['tmp_name'];
-        
+
         $delim = ',';
         $fileHandle = fopen($filePath, 'r');
         if ($fileHandle) {
@@ -597,12 +646,12 @@ class UsuarioAppController extends BaseWebController
 
         while (($row = fgetcsv($fileHandle, 1000, $delim)) !== false) {
             $totalProcesados++;
-            
+
             // Pad row if it has fewer elements than headers
             if (count($row) < count($headers)) {
                 $row = array_pad($row, count($headers), '');
             }
-            
+
             $data = array_combine($headers, array_slice(array_map('trim', $row), 0, count($headers)));
 
             $codigo = $data['codigo_empleado'] ?? '';
@@ -642,7 +691,7 @@ class UsuarioAppController extends BaseWebController
                         WHERE usuario_id = ?
                     ");
                     $stmtUpPerfil->execute([$nombres, $apellidos, $dni, $telefono ?: null, $userId]);
-                    
+
                     if (!empty($password)) {
                         $hash = password_hash($password, PASSWORD_BCRYPT);
                         $this->db->prepare("UPDATE usuarios SET password = ? WHERE id = ?")->execute([$hash, $userId]);

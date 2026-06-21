@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Models;
 
 use App\Core\Database;
@@ -10,7 +11,8 @@ abstract class BaseModel
     protected string $table;
     protected string $primaryKey = 'id';
 
-    public function __construct() {
+    public function __construct()
+    {
         $this->db = Database::getInstance(); // PDO directo
     }
 
@@ -21,7 +23,7 @@ abstract class BaseModel
             // Validar que solo contenga nombres de columna válidos
             // Patrón: "columna ASC/DESC, columna2 ASC/DESC"
             $parts = array_map('trim', explode(',', $orderBy));
-            
+
             foreach ($parts as $part) {
                 // Parsear "columna ASC/DESC"
                 if (!preg_match('/^(\w+)(?:\s+(ASC|DESC))?$/i', $part, $m)) {
@@ -94,4 +96,4 @@ abstract class BaseModel
     {
         return $this->db;
     }
-}
+}

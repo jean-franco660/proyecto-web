@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Controllers\Web;
 
 use App\Core\Request;
@@ -47,12 +48,24 @@ class HorarioWebController extends BaseWebController
         $dias     = $req->input('dias_semana', []);
 
         $errors = [];
-        if (!$sedeId)    $errors[] = 'sede_id es requerido';
-        if (!$nombre)    $errors[] = 'nombre es requerido';
-        if (!$hEntrada)  $errors[] = 'hora_entrada es requerido';
-        if (!$hSalida)   $errors[] = 'hora_salida es requerido';
-        if (empty($dias) || !is_array($dias)) $errors[] = 'dias_semana es requerido';
-        if ($errors) Response::unprocessable('Datos incompletos', $errors);
+        if (!$sedeId) {
+            $errors[] = 'sede_id es requerido';
+        }
+        if (!$nombre) {
+            $errors[] = 'nombre es requerido';
+        }
+        if (!$hEntrada) {
+            $errors[] = 'hora_entrada es requerido';
+        }
+        if (!$hSalida) {
+            $errors[] = 'hora_salida es requerido';
+        }
+        if (empty($dias) || !is_array($dias)) {
+            $errors[] = 'dias_semana es requerido';
+        }
+        if ($errors) {
+            Response::unprocessable('Datos incompletos', $errors);
+        }
 
         try {
             $horarioId = $this->model->crearHorario([
@@ -86,12 +99,24 @@ class HorarioWebController extends BaseWebController
         $tolSal   = $req->input('tolerancia_salida');
         $activo   = $req->input('activo');
 
-        if ($nombre !== null)   $data['nombre'] = $nombre;
-        if ($hEntrada !== null) $data['hora_entrada'] = $hEntrada;
-        if ($hSalida !== null)  $data['hora_salida'] = $hSalida;
-        if ($tolEnt !== null)   $data['tolerancia_entrada'] = (int) $tolEnt;
-        if ($tolSal !== null)   $data['tolerancia_salida'] = (int) $tolSal;
-        if ($activo !== null)   $data['activo'] = (int) $activo;
+        if ($nombre !== null) {
+            $data['nombre'] = $nombre;
+        }
+        if ($hEntrada !== null) {
+            $data['hora_entrada'] = $hEntrada;
+        }
+        if ($hSalida !== null) {
+            $data['hora_salida'] = $hSalida;
+        }
+        if ($tolEnt !== null) {
+            $data['tolerancia_entrada'] = (int) $tolEnt;
+        }
+        if ($tolSal !== null) {
+            $data['tolerancia_salida'] = (int) $tolSal;
+        }
+        if ($activo !== null) {
+            $data['activo'] = (int) $activo;
+        }
 
         $dias = $req->input('dias_semana');
 
@@ -114,7 +139,9 @@ class HorarioWebController extends BaseWebController
         $id   = (int) $req->param('id');
         $dias = $req->input('dias', []);
 
-        if (!is_array($dias)) Response::unprocessable('dias debe ser un array');
+        if (!is_array($dias)) {
+            Response::unprocessable('dias debe ser un array');
+        }
 
         try {
             $this->model->sincronizarDias($id, $dias);

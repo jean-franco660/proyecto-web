@@ -126,7 +126,9 @@ class AsistenciaWebController extends BaseWebController
             INNER JOIN usuario_sede us ON us.id = a.usuario_sede_id
             WHERE {$where}
         ");
-        foreach ($params as $k => $v) $stmtCount->bindValue($k, $v);
+        foreach ($params as $k => $v) {
+            $stmtCount->bindValue($k, $v);
+        }
         $stmtCount->execute();
         $total = (int) $stmtCount->fetchColumn();
 
@@ -155,7 +157,9 @@ class AsistenciaWebController extends BaseWebController
         $stmt = $this->db->prepare($sql);
         $stmt->bindValue(':limit', $perPage, \PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, \PDO::PARAM_INT);
-        foreach ($params as $k => $v) $stmt->bindValue($k, $v);
+        foreach ($params as $k => $v) {
+            $stmt->bindValue($k, $v);
+        }
         $stmt->execute();
         $records = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
@@ -342,9 +346,9 @@ class AsistenciaWebController extends BaseWebController
         $labels = [];
         $asistencias = [];
         $faltas = [];
-        
+
         $diasEnMes = cal_days_in_month(CAL_GREGORIAN, $mes, $anio);
-        
+
         $datosPorDia = [];
         foreach ($rows as $r) {
             $datosPorDia[(int)$r['dia']] = $r;
@@ -376,14 +380,14 @@ class AsistenciaWebController extends BaseWebController
         header('Content-Type: application/vnd.ms-excel; charset=utf-8');
         header('Content-Disposition: attachment; filename="' . $filename . '.xls"');
         echo "\xEF\xBB\xBF"; // UTF-8 BOM
-        
+
         echo "<table border='1' style='border-collapse:collapse; font-family:Arial, sans-serif;'>";
         echo "<tr style='background-color:#1e293b; color:white; font-weight:bold;'>";
         foreach ($columnas as $col) {
             echo "<th style='padding:8px;'>" . htmlspecialchars($col) . "</th>";
         }
         echo "</tr>";
-        
+
         if ($registros) {
             foreach ($registros as $r) {
                 echo "<tr>";
@@ -463,7 +467,7 @@ class AsistenciaWebController extends BaseWebController
         $columnas = ['Código Empleado', 'Trabajador', 'DNI', 'Sede', 'Turno', 'Fecha', 'Minutos Tarde', 'Estado', 'Entrada', 'Salida'];
         $filename = 'reporte_consolidado_' . date('Ymd_His');
 
-        $this->enviarExcel($registros, $filename, $columnas, function($r) {
+        $this->enviarExcel($registros, $filename, $columnas, function ($r) {
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['codigo_empleado']) . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['trabajador']) . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['dni']) . "</td>";
@@ -471,13 +475,23 @@ class AsistenciaWebController extends BaseWebController
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['turno'] ?? 'Sin turno') . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['fecha']) . "</td>";
             echo "<td style='padding:8px; text-align:right;'>" . (int)$r['minutos_tarde'] . "</td>";
-            
-            $color = '#475569'; $bg = '#f1f5f9';
-            if ($r['estado'] === 'PRESENTE') { $color = '#15803d'; $bg = '#dcfce7'; }
-            elseif ($r['estado'] === 'TARDANZA') { $color = '#b45309'; $bg = '#fef3c7'; }
-            elseif ($r['estado'] === 'FALTA') { $color = '#b91c1c'; $bg = '#fee2e2'; }
-            elseif ($r['estado'] === 'JUSTIFICADO') { $color = '#4338ca'; $bg = '#e0e7ff'; }
-            
+
+            $color = '#475569';
+            $bg = '#f1f5f9';
+            if ($r['estado'] === 'PRESENTE') {
+                $color = '#15803d';
+                $bg = '#dcfce7';
+            } elseif ($r['estado'] === 'TARDANZA') {
+                $color = '#b45309';
+                $bg = '#fef3c7';
+            } elseif ($r['estado'] === 'FALTA') {
+                $color = '#b91c1c';
+                $bg = '#fee2e2';
+            } elseif ($r['estado'] === 'JUSTIFICADO') {
+                $color = '#4338ca';
+                $bg = '#e0e7ff';
+            }
+
             echo "<td style='padding:8px; background-color:$bg; color:$color; font-weight:bold; text-align:center;'>" . htmlspecialchars($r['estado']) . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['entrada_fecha_hora'] ?? '—') . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['salida_fecha_hora'] ?? '—') . "</td>";
@@ -542,7 +556,7 @@ class AsistenciaWebController extends BaseWebController
         $columnas = ['Fecha', 'Sede', 'Turno', 'Entrada', 'Salida', 'Minutos Tarde', 'Estado'];
         $filename = 'reporte_individual_' . str_replace(' ', '_', strtolower($nombreTrabajador)) . '_' . date('Ymd_His');
 
-        $this->enviarExcel($registros, $filename, $columnas, function($r) {
+        $this->enviarExcel($registros, $filename, $columnas, function ($r) {
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['fecha']) . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['sede']) . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['turno'] ?? 'Sin turno') . "</td>";
@@ -550,11 +564,21 @@ class AsistenciaWebController extends BaseWebController
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['salida_fecha_hora'] ?? '—') . "</td>";
             echo "<td style='padding:8px; text-align:right;'>" . (int)$r['minutos_tarde'] . "</td>";
 
-            $color = '#475569'; $bg = '#f1f5f9';
-            if ($r['estado'] === 'PRESENTE') { $color = '#15803d'; $bg = '#dcfce7'; }
-            elseif ($r['estado'] === 'TARDANZA') { $color = '#b45309'; $bg = '#fef3c7'; }
-            elseif ($r['estado'] === 'FALTA') { $color = '#b91c1c'; $bg = '#fee2e2'; }
-            elseif ($r['estado'] === 'JUSTIFICADO') { $color = '#4338ca'; $bg = '#e0e7ff'; }
+            $color = '#475569';
+            $bg = '#f1f5f9';
+            if ($r['estado'] === 'PRESENTE') {
+                $color = '#15803d';
+                $bg = '#dcfce7';
+            } elseif ($r['estado'] === 'TARDANZA') {
+                $color = '#b45309';
+                $bg = '#fef3c7';
+            } elseif ($r['estado'] === 'FALTA') {
+                $color = '#b91c1c';
+                $bg = '#fee2e2';
+            } elseif ($r['estado'] === 'JUSTIFICADO') {
+                $color = '#4338ca';
+                $bg = '#e0e7ff';
+            }
 
             echo "<td style='padding:8px; background-color:$bg; color:$color; font-weight:bold; text-align:center;'>" . htmlspecialchars($r['estado']) . "</td>";
         });
@@ -626,7 +650,7 @@ class AsistenciaWebController extends BaseWebController
         $columnas = ['Sede', 'Código Empleado', 'Trabajador', 'DNI', 'Fecha', 'Turno', 'Entrada', 'Salida', 'Minutos Tarde', 'Estado'];
         $filename = 'reporte_por_sedes_' . date('Ymd_His');
 
-        $this->enviarExcel($registros, $filename, $columnas, function($r) {
+        $this->enviarExcel($registros, $filename, $columnas, function ($r) {
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['sede']) . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['codigo_empleado']) . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['trabajador']) . "</td>";
@@ -637,11 +661,21 @@ class AsistenciaWebController extends BaseWebController
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['salida_fecha_hora'] ?? '—') . "</td>";
             echo "<td style='padding:8px; text-align:right;'>" . (int)$r['minutos_tarde'] . "</td>";
 
-            $color = '#475569'; $bg = '#f1f5f9';
-            if ($r['estado'] === 'PRESENTE') { $color = '#15803d'; $bg = '#dcfce7'; }
-            elseif ($r['estado'] === 'TARDANZA') { $color = '#b45309'; $bg = '#fef3c7'; }
-            elseif ($r['estado'] === 'FALTA') { $color = '#b91c1c'; $bg = '#fee2e2'; }
-            elseif ($r['estado'] === 'JUSTIFICADO') { $color = '#4338ca'; $bg = '#e0e7ff'; }
+            $color = '#475569';
+            $bg = '#f1f5f9';
+            if ($r['estado'] === 'PRESENTE') {
+                $color = '#15803d';
+                $bg = '#dcfce7';
+            } elseif ($r['estado'] === 'TARDANZA') {
+                $color = '#b45309';
+                $bg = '#fef3c7';
+            } elseif ($r['estado'] === 'FALTA') {
+                $color = '#b91c1c';
+                $bg = '#fee2e2';
+            } elseif ($r['estado'] === 'JUSTIFICADO') {
+                $color = '#4338ca';
+                $bg = '#e0e7ff';
+            }
 
             echo "<td style='padding:8px; background-color:$bg; color:$color; font-weight:bold; text-align:center;'>" . htmlspecialchars($r['estado']) . "</td>";
         });
@@ -708,7 +742,7 @@ class AsistenciaWebController extends BaseWebController
         $columnas = ['Código Empleado', 'Trabajador', 'DNI', 'Sede', 'Turno', 'Fecha', 'Minutos Tarde', 'Estado', 'Entrada', 'Salida'];
         $filename = "reporte_mensual_{$anio}_{$mes}_" . date('Ymd_His');
 
-        $this->enviarExcel($registros, $filename, $columnas, function($r) {
+        $this->enviarExcel($registros, $filename, $columnas, function ($r) {
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['codigo_empleado']) . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['trabajador']) . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['dni']) . "</td>";
@@ -717,11 +751,21 @@ class AsistenciaWebController extends BaseWebController
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['fecha']) . "</td>";
             echo "<td style='padding:8px; text-align:right;'>" . (int)$r['minutos_tarde'] . "</td>";
 
-            $color = '#475569'; $bg = '#f1f5f9';
-            if ($r['estado'] === 'PRESENTE') { $color = '#15803d'; $bg = '#dcfce7'; }
-            elseif ($r['estado'] === 'TARDANZA') { $color = '#b45309'; $bg = '#fef3c7'; }
-            elseif ($r['estado'] === 'FALTA') { $color = '#b91c1c'; $bg = '#fee2e2'; }
-            elseif ($r['estado'] === 'JUSTIFICADO') { $color = '#4338ca'; $bg = '#e0e7ff'; }
+            $color = '#475569';
+            $bg = '#f1f5f9';
+            if ($r['estado'] === 'PRESENTE') {
+                $color = '#15803d';
+                $bg = '#dcfce7';
+            } elseif ($r['estado'] === 'TARDANZA') {
+                $color = '#b45309';
+                $bg = '#fef3c7';
+            } elseif ($r['estado'] === 'FALTA') {
+                $color = '#b91c1c';
+                $bg = '#fee2e2';
+            } elseif ($r['estado'] === 'JUSTIFICADO') {
+                $color = '#4338ca';
+                $bg = '#e0e7ff';
+            }
 
             echo "<td style='padding:8px; background-color:$bg; color:$color; font-weight:bold; text-align:center;'>" . htmlspecialchars($r['estado']) . "</td>";
             echo "<td style='padding:8px;'>" . htmlspecialchars($r['entrada_fecha_hora'] ?? '—') . "</td>";

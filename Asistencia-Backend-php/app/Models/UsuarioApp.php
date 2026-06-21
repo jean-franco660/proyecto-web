@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Models;
 
 class UsuarioApp extends BaseModel
@@ -59,7 +60,10 @@ class UsuarioApp extends BaseModel
     {
         $sql    = "SELECT COUNT(*) FROM `{$this->table}` WHERE codigo_empleado = ?";
         $params = [$codigo];
-        if ($excludeId) { $sql .= " AND id != ?"; $params[] = $excludeId; }
+        if ($excludeId) {
+            $sql .= " AND id != ?";
+            $params[] = $excludeId;
+        }
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
         return (int)$stmt->fetchColumn() > 0;
@@ -84,7 +88,7 @@ class UsuarioApp extends BaseModel
     {
         // Cancelar pendientes anteriores
         $this->db->prepare("UPDATE password_resets_app SET estado = 'RECHAZADA' WHERE usuario_id = ? AND estado = 'PENDIENTE'")->execute([$usuarioId]);
-        
+
         // Crear nueva solicitud
         $this->db->prepare("INSERT INTO password_resets_app (usuario_id, estado) VALUES (?, 'PENDIENTE')")->execute([$usuarioId]);
     }

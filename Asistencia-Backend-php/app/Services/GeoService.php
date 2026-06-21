@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Services;
@@ -16,7 +17,7 @@ class GeoService
         $Δφ = deg2rad($lat2 - $lat1);
         $Δλ = deg2rad($lng2 - $lng1);
 
-        $a = sin($Δφ/2) ** 2 + cos($φ1) * cos($φ2) * sin($Δλ/2) ** 2;
+        $a = sin($Δφ / 2) ** 2 + cos($φ1) * cos($φ2) * sin($Δλ / 2) ** 2;
         return $R * 2 * atan2(sqrt($a), sqrt(1 - $a));
     }
 

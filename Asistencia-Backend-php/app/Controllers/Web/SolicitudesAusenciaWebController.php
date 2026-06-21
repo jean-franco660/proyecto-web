@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Controllers\Web;
 
 use App\Core\Request;
@@ -47,7 +48,7 @@ class SolicitudesAusenciaWebController extends BaseWebController
             if (empty($misSedes)) {
                 Response::success([]);
                 return;
-              }
+            }
               $in = implode(',', array_map('intval', $misSedes));
               $sql .= " AND j.usuario_id IN (
                   SELECT us2.usuario_id FROM usuario_sede us2
@@ -91,7 +92,9 @@ class SolicitudesAusenciaWebController extends BaseWebController
         $stmt->execute([':id' => $id]);
         $just = $stmt->fetch();
 
-        if (!$just) Response::notFound('Solicitud no encontrada');
+        if (!$just) {
+            Response::notFound('Solicitud no encontrada');
+        }
         if ($just['estado_nombre'] !== 'PENDIENTE') {
             Response::error('Solo se pueden aprobar solicitudes pendientes', 400);
         }
@@ -150,7 +153,9 @@ class SolicitudesAusenciaWebController extends BaseWebController
         $stmt->execute([':id' => $id]);
         $just = $stmt->fetch();
 
-        if (!$just) Response::notFound('Solicitud no encontrada');
+        if (!$just) {
+            Response::notFound('Solicitud no encontrada');
+        }
         if ($just['estado_nombre'] !== 'PENDIENTE') {
             Response::error('Solo se pueden rechazar solicitudes pendientes', 400);
         }

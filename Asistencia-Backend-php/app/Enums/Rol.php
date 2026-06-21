@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Enums;
@@ -14,7 +15,7 @@ enum Rol: int
      */
     public function label(): string
     {
-        return match($this) {
+        return match ($this) {
             self::ADMIN => 'administrador',
             self::SUPERVISOR => 'supervisor',
             self::TRABAJADOR => 'trabajador',
@@ -26,7 +27,7 @@ enum Rol: int
      */
     public static function fromLabel(string $label): ?self
     {
-        return match(strtolower(trim($label))) {
+        return match (strtolower(trim($label))) {
             'administrador', 'admin' => self::ADMIN,
             'supervisor' => self::SUPERVISOR,
             'trabajador' => self::TRABAJADOR,

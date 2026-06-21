@@ -34,7 +34,7 @@ class AuthWebController
         $user = $this->model->findByEmail($email);
 
         if (!$user || !password_verify($password, $user['password'])) {
-            Response::unauthorized('Credenciales incorrectas'); 
+            Response::unauthorized('Credenciales incorrectas');
         }
 
         // Esquema v2: estado viene del catálogo estados_usuario
@@ -141,7 +141,7 @@ class AuthWebController
 
         // Obtener usuario completo y generar token final
         $user = $this->model->find($userId);
-        
+
         $rolMap = ['ADMIN' => 'administrador', 'SUPERVISOR' => 'supervisor'];
         $rolNormalizado = $rolMap[$user['rol']] ?? strtolower($user['rol']);
 
@@ -164,7 +164,9 @@ class AuthWebController
     {
         $userId = (int) ($_REQUEST['auth_user']['sub'] ?? 0);
         $user   = $this->model->find($userId);
-        if (!$user) Response::notFound('Usuario no encontrado');
+        if (!$user) {
+            Response::notFound('Usuario no encontrado');
+        }
         unset($user['password']);
         if (isset($user['rol'])) {
             $rolMap = ['ADMIN' => 'administrador', 'SUPERVISOR' => 'supervisor'];

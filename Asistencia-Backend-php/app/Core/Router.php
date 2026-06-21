@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Core;
 
 class Router
@@ -6,25 +7,70 @@ class Router
     private array $routes = [];
 
     // Registro de rutas públicas
-    public function get(string $path, array $handler): void    { $this->add('GET',    $path, $handler); }
-    public function post(string $path, array $handler): void   { $this->add('POST',   $path, $handler); }
-    public function put(string $path, array $handler): void    { $this->add('PUT',    $path, $handler); }
-    public function patch(string $path, array $handler): void  { $this->add('PATCH',  $path, $handler); }
-    public function delete(string $path, array $handler): void { $this->add('DELETE', $path, $handler); }
+    public function get(string $path, array $handler): void
+    {
+        $this->add('GET', $path, $handler);
+    }
+    public function post(string $path, array $handler): void
+    {
+        $this->add('POST', $path, $handler);
+    }
+    public function put(string $path, array $handler): void
+    {
+        $this->add('PUT', $path, $handler);
+    }
+    public function patch(string $path, array $handler): void
+    {
+        $this->add('PATCH', $path, $handler);
+    }
+    public function delete(string $path, array $handler): void
+    {
+        $this->add('DELETE', $path, $handler);
+    }
 
     // Rutas protegidas JWT tipo 'app' (trabajadores)
-    public function authAppGet(string $p, array $h): void    { $this->add('GET',    $p, $h, 'app'); }
-    public function authAppPost(string $p, array $h): void   { $this->add('POST',   $p, $h, 'app'); }
-    public function authAppPut(string $p, array $h): void    { $this->add('PUT',    $p, $h, 'app'); }
-    public function authAppPatch(string $p, array $h): void  { $this->add('PATCH',  $p, $h, 'app'); }
-    public function authAppDelete(string $p, array $h): void { $this->add('DELETE', $p, $h, 'app'); }
+    public function authAppGet(string $p, array $h): void
+    {
+        $this->add('GET', $p, $h, 'app');
+    }
+    public function authAppPost(string $p, array $h): void
+    {
+        $this->add('POST', $p, $h, 'app');
+    }
+    public function authAppPut(string $p, array $h): void
+    {
+        $this->add('PUT', $p, $h, 'app');
+    }
+    public function authAppPatch(string $p, array $h): void
+    {
+        $this->add('PATCH', $p, $h, 'app');
+    }
+    public function authAppDelete(string $p, array $h): void
+    {
+        $this->add('DELETE', $p, $h, 'app');
+    }
 
     //  Rutas protegidas JWT tipo 'web' (administradores)
-    public function authWebGet(string $p, array $h): void    { $this->add('GET',    $p, $h, 'web'); }
-    public function authWebPost(string $p, array $h): void   { $this->add('POST',   $p, $h, 'web'); }
-    public function authWebPut(string $p, array $h): void    { $this->add('PUT',    $p, $h, 'web'); }
-    public function authWebPatch(string $p, array $h): void  { $this->add('PATCH',  $p, $h, 'web'); }
-    public function authWebDelete(string $p, array $h): void { $this->add('DELETE', $p, $h, 'web'); }
+    public function authWebGet(string $p, array $h): void
+    {
+        $this->add('GET', $p, $h, 'web');
+    }
+    public function authWebPost(string $p, array $h): void
+    {
+        $this->add('POST', $p, $h, 'web');
+    }
+    public function authWebPut(string $p, array $h): void
+    {
+        $this->add('PUT', $p, $h, 'web');
+    }
+    public function authWebPatch(string $p, array $h): void
+    {
+        $this->add('PATCH', $p, $h, 'web');
+    }
+    public function authWebDelete(string $p, array $h): void
+    {
+        $this->add('DELETE', $p, $h, 'web');
+    }
 
     private function add(string $method, string $path, array $handler, ?string $auth = null): void
     {
@@ -59,7 +105,9 @@ class Router
         $req    = $request; // Usa el Request inyectado desde index.php
 
         foreach ($this->routes as $route) {
-            if ($route['method'] !== $method) continue;
+            if ($route['method'] !== $method) {
+                continue;
+            }
 
             if (preg_match($route['pattern'], $uri, $matches)) {
                 // Inyectar parámetros de ruta en el Request

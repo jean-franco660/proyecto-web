@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Controllers\Web;
 
 use App\Core\Request;
@@ -15,7 +16,8 @@ class SedeWebController extends BaseWebController
 {
     private Sede $model;
 
-    public function __construct() {
+    public function __construct()
+    {
         $this->model = new Sede();
     }
 
@@ -63,12 +65,24 @@ class SedeWebController extends BaseWebController
         ]);
 
         $errors = [];
-        if (empty($data['codigo']))       $errors[] = 'codigo es requerido';
-        if (empty($data['nombre']))       $errors[] = 'nombre es requerido';
-        if (!isset($data['latitud']))     $errors[] = 'latitud es requerida';
-        if (!isset($data['longitud']))    $errors[] = 'longitud es requerida';
-        if (!isset($data['radio_metros'])) $errors[] = 'radio_metros es requerido';
-        if ($errors) Response::unprocessable('Datos incompletos', $errors);
+        if (empty($data['codigo'])) {
+            $errors[] = 'codigo es requerido';
+        }
+        if (empty($data['nombre'])) {
+            $errors[] = 'nombre es requerido';
+        }
+        if (!isset($data['latitud'])) {
+            $errors[] = 'latitud es requerida';
+        }
+        if (!isset($data['longitud'])) {
+            $errors[] = 'longitud es requerida';
+        }
+        if (!isset($data['radio_metros'])) {
+            $errors[] = 'radio_metros es requerido';
+        }
+        if ($errors) {
+            Response::unprocessable('Datos incompletos', $errors);
+        }
 
         $id = $this->model->create($data);
         Response::success($this->model->find($id), 'Sede creada correctamente', 201);
@@ -78,7 +92,9 @@ class SedeWebController extends BaseWebController
     public function show(Request $req): void
     {
         $sede = $this->model->find((int) $req->param('id'));
-        if (!$sede) Response::notFound('Sede no encontrada');
+        if (!$sede) {
+            Response::notFound('Sede no encontrada');
+        }
         Response::success($sede);
     }
 
@@ -87,7 +103,9 @@ class SedeWebController extends BaseWebController
     {
         $id   = (int) $req->param('id');
         $sede = $this->model->find($id);
-        if (!$sede) Response::notFound('Sede no encontrada');
+        if (!$sede) {
+            Response::notFound('Sede no encontrada');
+        }
 
         $data = $req->only(['nombre','direccion','latitud','longitud','radio_metros']);
         $this->model->update($id, $data);
@@ -99,7 +117,9 @@ class SedeWebController extends BaseWebController
     {
         $id   = (int) $req->param('id');
         $sede = $this->model->find($id);
-        if (!$sede) Response::notFound('Sede no encontrada');
+        if (!$sede) {
+            Response::notFound('Sede no encontrada');
+        }
 
         try {
             $this->model->delete($id);
@@ -137,7 +157,7 @@ class SedeWebController extends BaseWebController
         }
 
         $filePath = $_FILES['file']['tmp_name'];
-        
+
         $delim = ',';
         $fileHandle = fopen($filePath, 'r');
         if ($fileHandle) {
@@ -164,14 +184,14 @@ class SedeWebController extends BaseWebController
 
         while (($row = fgetcsv($fileHandle, 1000, $delim)) !== false) {
             $totalProcesados++;
-            
+
             // Pad row if it has fewer elements than headers
             if (count($row) < count($headers)) {
                 $row = array_pad($row, count($headers), '');
             }
-            
+
             $data = array_combine($headers, array_slice(array_map('trim', $row), 0, count($headers)));
-            
+
             $codigo = $data['codigo'] ?? '';
             $nombre = $data['nombre'] ?? '';
             $direccion = $data['direccion'] ?? '';

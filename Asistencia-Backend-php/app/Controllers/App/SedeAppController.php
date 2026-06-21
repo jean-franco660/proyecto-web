@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Controllers\App;
 
 use App\Core\Request;
@@ -59,7 +60,9 @@ class SedeAppController extends BaseAppController
         ");
         $stmt->execute([':uid' => $userId, ':sid' => $sedeId]);
         $sede = $stmt->fetch();
-        if (!$sede) Response::notFound('No estás asignado a esta sede');
+        if (!$sede) {
+            Response::notFound('No estás asignado a esta sede');
+        }
         Response::success($sede);
     }
 }

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Middleware;
@@ -38,7 +39,6 @@ class AuthWebMiddleware
             }
 
             $_REQUEST['auth_user'] = $payload;
-
         } catch (ExpiredException $e) {
             Response::unauthorized('Token expirado');
         } catch (\Exception $e) {

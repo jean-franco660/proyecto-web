@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Services;
@@ -9,7 +10,7 @@ class TardanzaService
 {
     /**
      * Calcula los minutos de tardanza y determina si corresponde al estado de TARDANZA.
-     * 
+     *
      * @param string $tipo Tipo de marcación (ENTRADA o SALIDA)
      * @param DateTime $marcadaEn Fecha y hora de la marcación
      * @param string $horaEntradaStr Hora de entrada asignada (ej. '08:00:00')

@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Controllers\Web;
 
 use App\Core\Request;

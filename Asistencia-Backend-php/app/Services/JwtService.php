@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Services;
@@ -51,7 +52,7 @@ class JwtService
     {
         $table = $type === 'web' ? 'tokens_web' : 'tokens_app';
         $db = Database::getInstance();
-        
+
         try {
             $stmt = $db->prepare("SELECT id FROM `{$table}` WHERE token = ? LIMIT 1");
             $stmt->execute([$token]);

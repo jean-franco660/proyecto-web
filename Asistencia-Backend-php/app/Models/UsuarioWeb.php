@@ -35,7 +35,10 @@ class UsuarioWeb extends BaseModel
     {
         $sql    = "SELECT COUNT(*) FROM `{$this->table}` WHERE email = ?";
         $params = [$email];
-        if ($excludeId) { $sql .= " AND id != ?"; $params[] = $excludeId; }
+        if ($excludeId) {
+            $sql .= " AND id != ?";
+            $params[] = $excludeId;
+        }
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
         return (int)$stmt->fetchColumn() > 0;

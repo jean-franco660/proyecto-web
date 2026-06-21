@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Core;
 
 use PDO;
@@ -35,6 +36,10 @@ class Database
     }
 
     // Evitar clonación e instanciación directa
-    private function __construct() {}
-    private function __clone() {}
+    private function __construct()
+    {
+    }
+    private function __clone()
+    {
+    }
 }

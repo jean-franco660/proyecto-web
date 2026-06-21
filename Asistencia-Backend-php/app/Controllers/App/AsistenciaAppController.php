@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Controllers\App;
 
 use App\Core\Request;
@@ -106,7 +107,7 @@ class AsistenciaAppController extends BaseAppController
         $marcadaEn   = new \DateTime($fechaHora);
         $fechaDia    = $marcadaEn->format('Y-m-d');
         $estadoId    = 2; // PRESENTE por defecto
-        
+
         $tardanzaService = new TardanzaService();
         $calc = $tardanzaService->calcularTardanza($tipo, $marcadaEn, $asignacion['hora_entrada'], (int)$asignacion['tolerancia_entrada']);
         $minutosTarde = $calc['minutosTarde'];
@@ -144,7 +145,7 @@ class AsistenciaAppController extends BaseAppController
                 WHERE asistencia_id = :aid AND tipo_id = :tid AND activo = 1
             ");
             $stmt->execute([':aid' => $asistenciaId, ':tid' => $tipoId]);
-            
+
             if ((int)$stmt->fetchColumn() > 0) {
                 throw new MarcacionDuplicadaException(
                     "Ya has marcado {$tipo} hoy en esta sede.",
@@ -202,7 +203,6 @@ class AsistenciaAppController extends BaseAppController
                 'distancia_metros'  => (int) $distancia,
                 'estado_asistencia' => $estadoNombres[$estadoId] ?? 'PRESENTE',
             ];
-
         } catch (MarcacionException $e) {
             $this->db->rollBack();
             throw $e;
@@ -222,8 +222,9 @@ class AsistenciaAppController extends BaseAppController
         $solicitadoId = (int) $req->param('usuarioId');
 
         // Solo puede ver su propio historial
-        if ($solicitadoId !== $userId)
+        if ($solicitadoId !== $userId) {
             Response::forbidden('Solo puedes ver tu propio historial');
+        }
 
         $stmt = $this->db->prepare("
             SELECT a.*, ea.nombre AS estado,
@@ -361,7 +362,7 @@ class AsistenciaAppController extends BaseAppController
                     'uuid'   => $uuid,
                     'status' => 'rechazado',
                     'error'  => $e->getMessage(),
-                    'details'=> $e->getDetails()
+                    'details' => $e->getDetails()
                 ];
             } catch (\Exception $e) {
                 $resultados[] = [

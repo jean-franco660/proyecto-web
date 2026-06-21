@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Controllers\Web;
 
 use App\Core\Request;
@@ -94,9 +95,12 @@ class JustificacionWebController extends BaseWebController
         $stmt->execute([':id' => $id]);
         $just = $stmt->fetch();
 
-        if (!$just) Response::notFound('Justificación no encontrada');
-        if ($just['estado_nombre'] !== 'PENDIENTE')
+        if (!$just) {
+            Response::notFound('Justificación no encontrada');
+        }
+        if ($just['estado_nombre'] !== 'PENDIENTE') {
             Response::error('Solo se pueden aprobar justificaciones pendientes', 400);
+        }
 
         $this->db->beginTransaction();
         try {
@@ -142,7 +146,9 @@ class JustificacionWebController extends BaseWebController
         $id   = (int) $req->param('id');
         $obs  = (string) $req->input('observaciones', '');
 
-        if (empty($obs)) Response::unprocessable('Las observaciones son requeridas al rechazar');
+        if (empty($obs)) {
+            Response::unprocessable('Las observaciones son requeridas al rechazar');
+        }
 
         $stmt = $this->db->prepare("
             SELECT j.*, ej.nombre AS estado_nombre
@@ -153,9 +159,12 @@ class JustificacionWebController extends BaseWebController
         $stmt->execute([':id' => $id]);
         $just = $stmt->fetch();
 
-        if (!$just) Response::notFound('Justificación no encontrada');
-        if ($just['estado_nombre'] !== 'PENDIENTE')
+        if (!$just) {
+            Response::notFound('Justificación no encontrada');
+        }
+        if ($just['estado_nombre'] !== 'PENDIENTE') {
             Response::error('Solo se pueden rechazar justificaciones pendientes', 400);
+        }
 
         $this->db->beginTransaction();
         try {
@@ -206,7 +215,9 @@ class JustificacionWebController extends BaseWebController
         ");
         $stmt->execute([':id' => $id]);
         $just = $stmt->fetch();
-        if (!$just) Response::notFound('Justificación no encontrada');
+        if (!$just) {
+            Response::notFound('Justificación no encontrada');
+        }
         Response::success($just);
     }
 
@@ -223,9 +234,12 @@ class JustificacionWebController extends BaseWebController
         $stmt->execute([':id' => $id]);
         $just = $stmt->fetch();
 
-        if (!$just) Response::notFound('Justificación no encontrada');
-        if ($just['estado_nombre'] !== 'PENDIENTE')
+        if (!$just) {
+            Response::notFound('Justificación no encontrada');
+        }
+        if ($just['estado_nombre'] !== 'PENDIENTE') {
             Response::error('Solo se pueden eliminar justificaciones pendientes', 400);
+        }
 
         $stmt = $this->db->prepare("DELETE FROM justificaciones WHERE id = :id");
         $stmt->execute([':id' => $id]);

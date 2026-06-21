@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Controllers\Web;
 
 use App\Core\Request;
@@ -13,11 +14,11 @@ use App\Core\Database;
  */
 class UsuarioWebController extends BaseWebController
 {
-
     private function soloAdministrador(): void
     {
-        if (!$this->esAdmin())
+        if (!$this->esAdmin()) {
             Response::error('Solo el administrador puede gestionar usuarios web', 403);
+        }
     }
 
     /** GET /v1/web/usuarios-web — listar admins y supervisores */
@@ -73,7 +74,9 @@ class UsuarioWebController extends BaseWebController
         ");
         $stmt->execute([$id]);
         $user = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if (!$user) Response::notFound('Usuario web no encontrado');
+        if (!$user) {
+            Response::notFound('Usuario web no encontrado');
+        }
 
         $rolMap = ['ADMIN' => 'administrador', 'SUPERVISOR' => 'supervisor'];
         $user['rol'] = $rolMap[$user['rol']] ?? strtolower($user['rol']);
@@ -92,11 +95,21 @@ class UsuarioWebController extends BaseWebController
         $rol      = (string) $req->input('rol'); // administrador | supervisor
 
         $errors = [];
-        if (!$nombre)   $errors[] = 'nombre es requerido';
-        if (!$email)    $errors[] = 'email es requerido';
-        if (!$password) $errors[] = 'password es requerido';
-        if (!in_array($rol, ['administrador', 'supervisor'])) $errors[] = 'rol inválido';
-        if ($errors) Response::unprocessable('Datos incompletos', $errors);
+        if (!$nombre) {
+            $errors[] = 'nombre es requerido';
+        }
+        if (!$email) {
+            $errors[] = 'email es requerido';
+        }
+        if (!$password) {
+            $errors[] = 'password es requerido';
+        }
+        if (!in_array($rol, ['administrador', 'supervisor'])) {
+            $errors[] = 'rol inválido';
+        }
+        if ($errors) {
+            Response::unprocessable('Datos incompletos', $errors);
+        }
 
         // Validar complejidad de contraseña (mínimo 8 caracteres, letras y números)
         if (!\App\Core\Validator::isSecurePassword($password)) {
@@ -106,7 +119,9 @@ class UsuarioWebController extends BaseWebController
         // Verificar email único
         $stmt = $this->db->prepare("SELECT id FROM usuarios WHERE email = ?");
         $stmt->execute([$email]);
-        if ($stmt->fetch()) Response::error('El email ya está registrado', 422);
+        if ($stmt->fetch()) {
+            Response::error('El email ya está registrado', 422);
+        }
 
         // Mapear rol a ID del catálogo
         $rolMap = ['administrador' => 1, 'supervisor' => 2]; // ADMIN=1, SUPERVISOR=2
@@ -176,7 +191,9 @@ class UsuarioWebController extends BaseWebController
             if ($req->input('estado') !== null) {
                 $estadoMap = ['ACTIVO' => 1, 'INACTIVO' => 2, 'BLOQUEADO' => 3];
                 $estadoId = $estadoMap[strtoupper(trim($req->input('estado')))] ?? null;
-                if (!$estadoId) Response::unprocessable('Estado inválido');
+                if (!$estadoId) {
+                    Response::unprocessable('Estado inválido');
+                }
                 $camposUser[] = "`estado_id` = ?";
                 $paramsUser[] = $estadoId;
             }
@@ -198,7 +215,9 @@ class UsuarioWebController extends BaseWebController
             if ($req->input('rol') !== null) {
                 $rolMap = ['administrador' => 1, 'supervisor' => 2];
                 $nuevoRolId = $rolMap[$req->input('rol')] ?? null;
-                if (!$nuevoRolId) Response::unprocessable('Rol inválido');
+                if (!$nuevoRolId) {
+                    Response::unprocessable('Rol inválido');
+                }
                 $this->db->prepare("DELETE FROM usuario_roles WHERE usuario_id = ? AND rol_id IN (1,2)")
                     ->execute([$id]);
                 $this->db->prepare("INSERT INTO usuario_roles (usuario_id, rol_id) VALUES (?, ?)")
@@ -223,8 +242,9 @@ class UsuarioWebController extends BaseWebController
 
         $estadoMap = ['ACTIVO' => 1, 'INACTIVO' => 2, 'BLOQUEADO' => 3];
         $estadoId = $estadoMap[$estado] ?? null;
-        if (!$estadoId)
+        if (!$estadoId) {
             Response::unprocessable('Estado inválido');
+        }
 
         $this->db->prepare("UPDATE usuarios SET estado_id = ? WHERE id = ?")->execute([$estadoId, $id]);
         Response::success(null, "Estado cambiado a {$estado}");
