@@ -87,9 +87,6 @@ class Response
     {
         http_response_code($status);
         header('Content-Type: application/json; charset=UTF-8');
-        header('Access-Control-Allow-Origin: *');
-        header('Access-Control-Allow-Headers: Authorization, Content-Type');
-        header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
 
         echo json_encode($data, JSON_UNESCAPED_UNICODE);
         exit();

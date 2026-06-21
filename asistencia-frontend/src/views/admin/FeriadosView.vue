@@ -40,13 +40,21 @@
         
         <!-- Actual days -->
         <div v-for="date in daysInMonth" :key="date.day" 
-             @click="openModalForDate(date.fullDateStr)"
+             @click="handleDateClick(date.fullDateStr)"
              class="min-h-[120px] p-2 border-r border-b border-slate-200 last:border-r-0 cursor-pointer hover:bg-slate-50 transition-colors group relative"
-             :class="{'bg-teal-50/30': date.isToday}">
+             :class="{
+               'bg-teal-50/30': date.isToday,
+               'bg-rose-50/40': hasFeriado(date.fullDateStr) && !date.isToday
+             }">
           
           <div class="flex justify-between items-start">
             <span class="text-sm font-medium" :class="date.isToday ? 'text-teal-600 bg-teal-100 w-6 h-6 rounded-full flex items-center justify-center' : 'text-slate-700'">
               {{ date.day }}
+            </span>
+            <!-- Red dot for holiday -->
+            <span v-if="hasFeriado(date.fullDateStr)" class="flex h-2 w-2 relative">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
             </span>
           </div>
 
@@ -68,34 +76,8 @@
       </div>
     </div>
 
-    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mt-4">
-      <div class="px-4 py-3 border-b border-slate-200 bg-slate-50 font-semibold">Lista de Feriados</div>
-      <div class="overflow-x-auto">
-        <table class="min-w-full divide-y divide-slate-200">
-          <thead class="bg-slate-50">
-            <tr>
-              <th class="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fecha</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Nombre</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Tipo</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sede</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Activo</th>
-            </tr>
-          </thead>
-          <tbody class="bg-white divide-y divide-slate-200">
-            <tr v-for="f in feriados" :key="f.id" class="hover:bg-slate-50">
-              <td class="px-3 py-2 text-sm text-slate-700">{{ f.fecha }}</td>
-              <td class="px-3 py-2 text-sm text-slate-700">{{ f.nombre || f.motivo }}</td>
-              <td class="px-3 py-2 text-sm text-slate-700">{{ f.tipo }}</td>
-              <td class="px-3 py-2 text-sm text-slate-700">{{ getSedeName(f.sede_id) }}</td>
-              <td class="px-3 py-2 text-sm font-semibold" :class="f.activo == 1 ? 'text-emerald-600' : 'text-rose-600'">{{ f.activo == 1 ? 'Sí' : 'No' }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
     <!-- Modal Form -->
-    <div v-if="isModalOpen" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div v-if="isModalOpen" @click.self="handleCloseAttempt" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
         <h3 class="text-lg font-bold text-slate-800 mb-4">{{ isEditing ? 'Editar Feriado' : 'Nuevo Feriado' }}</h3>
         <form @submit.prevent="saveItem" class="space-y-4">
@@ -132,10 +114,10 @@
           </div>
           <div class="flex justify-between space-x-3 pt-4 border-t border-slate-100">
             <div>
-              <button v-if="isEditing" type="button" @click="deleteItem(form.id)" class="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg">Eliminar</button>
+              <button v-if="isEditing" type="button" @click="deleteItem" class="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg">Eliminar</button>
             </div>
             <div class="flex space-x-2">
-              <button type="button" @click="closeModal" class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+              <button type="button" @click="handleCloseAttempt" class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
               <button type="submit" class="btn-primary" :disabled="saving">
                 {{ saving ? 'Guardando...' : 'Guardar' }}
               </button>
@@ -148,7 +130,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import api from '@/api/axios'
 
 const feriados = ref([])
@@ -163,6 +145,7 @@ const currentDate = ref(new Date())
 const isModalOpen = ref(false)
 const saving = ref(false)
 const isEditing = ref(false)
+const originalForm = ref(null)
 
 const form = reactive({
   id: null,
@@ -237,15 +220,50 @@ const getFeriadosForDate = (dateStr) => {
   return feriados.value.filter(f => f.fecha === dateStr && (f.activo === 1 || f.estado === 'activo' || f.activo === true))
 }
 
+const hasFeriado = (dateStr) => {
+  return getFeriadosForDate(dateStr).length > 0
+}
+
+const handleDateClick = (dateStr) => {
+  const dayFeriados = getFeriadosForDate(dateStr)
+  if (dayFeriados.length > 0) {
+    openModal(dayFeriados[0])
+  } else {
+    openModalForDate(dateStr)
+  }
+}
+
 const getSedeName = (sedeId) => {
   if (!sedeId) return 'N/A'
   const s = sedes.value.find(x => x.id === sedeId)
   return s ? s.nombre : 'N/A'
 }
 
+const hasChanges = computed(() => {
+  if (!originalForm.value) return false
+  return JSON.stringify(form) !== originalForm.value
+})
+
+const handleCloseAttempt = () => {
+  if (isEditing.value && hasChanges.value) {
+    if (confirm('Tienes cambios sin guardar. ¿Seguro que deseas descartar los cambios?')) {
+      closeModal()
+    }
+  } else {
+    closeModal()
+  }
+}
+
+const handleKeyDown = (e) => {
+  if (e.key === 'Escape' && isModalOpen.value) {
+    handleCloseAttempt()
+  }
+}
+
 const openModalForDate = (dateStr) => {
   isEditing.value = false
   Object.assign(form, { id: null, fecha: dateStr, nombre: '', tipo: 'NACIONAL', sede_id: '', estado: 1 })
+  originalForm.value = JSON.stringify(form)
   isModalOpen.value = true
 }
 
@@ -258,13 +276,14 @@ const openModal = (item = null) => {
       nombre: item.nombre || item.motivo || '',
       tipo: item.tipo || 'NACIONAL',
       sede_id: item.sede_id || '',
-      estado: item.activo !== undefined ? item.activo : 1
+      estado: item.activo !== undefined ? (item.activo ? 1 : 0) : 1
     })
   } else {
     isEditing.value = false
     const todayStr = new Date().toISOString().split('T')[0]
     Object.assign(form, { id: null, fecha: todayStr, nombre: '', tipo: 'NACIONAL', sede_id: '', estado: 1 })
   }
+  originalForm.value = JSON.stringify(form)
   isModalOpen.value = true
 }
 
@@ -273,9 +292,22 @@ const closeModal = () => {
 }
 
 const saveItem = async () => {
+  form.nombre = form.nombre ? form.nombre.trim() : ''
+  if (!form.fecha) {
+    alert('La fecha es requerida')
+    return
+  }
+  if (!form.nombre) {
+    alert('El nombre del feriado es requerido')
+    return
+  }
+
   saving.value = true
   try {
-    const payload = { ...form }
+    const payload = { 
+      ...form,
+      nombre: form.nombre
+    }
     if (payload.tipo !== 'EMPRESA') delete payload.sede_id
     payload.activo = payload.estado
     
@@ -293,18 +325,28 @@ const saveItem = async () => {
   }
 }
 
-const deleteItem = async (id) => {
+const deleteItem = async () => {
+  const id = form.id
+  if (!id) {
+    alert('ID de feriado no válido')
+    return
+  }
   if (!confirm('¿Seguro que deseas eliminar este feriado?')) return
   try {
     await api.delete(`/v1/web/feriados/${id}`)
     closeModal()
     fetchFeriados()
   } catch (err) {
-    alert(err.response?.data?.error || 'Error al eliminar')
+    alert(err.response?.data?.error || err.response?.data?.message || 'Error al eliminar')
   }
 }
 
 onMounted(() => {
   fetchFeriados()
+  window.addEventListener('keydown', handleKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
 })
 </script>

@@ -25,7 +25,7 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-200 bg-white">
-          <tr v-for="user in usuarios.filter(u => u.rol === 'administrador')" :key="user.id" class="hover:bg-slate-50 transition-colors">
+          <tr v-for="user in admins" :key="user.id" class="hover:bg-slate-50 transition-colors">
             <td class="px-6 py-4 whitespace-nowrap">
               <div class="flex items-center">
                 <div class="flex-shrink-0 h-8 w-8 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 font-bold">
@@ -100,10 +100,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import api from '@/api/axios'
 
 const usuarios = ref([])
+const admins = computed(() => usuarios.value.filter(u => u.rol === 'administrador'))
 const loading = ref(true)
 const error = ref(null)
 const isModalOpen = ref(false)
@@ -150,11 +151,49 @@ const closeModal = () => {
 }
 
 const saveItem = async () => {
+  form.nombre = form.nombre ? form.nombre.trim() : ''
+  form.email = form.email ? form.email.trim() : ''
+  form.password = form.password ? form.password.trim() : ''
+
+  if (!form.nombre) {
+    alert('El nombre completo es requerido')
+    return
+  }
+  if (!form.email) {
+    alert('El correo electrónico es requerido')
+    return
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(form.email)) {
+    alert('Ingrese un correo electrónico válido')
+    return
+  }
+  if (!isEditing.value) {
+    if (!form.password) {
+      alert('La contraseña es requerida')
+      return
+    }
+    if (form.password.length < 6) {
+      alert('La contraseña debe tener al menos 6 caracteres')
+      return
+    }
+  } else {
+    if (form.password && form.password.length < 6) {
+      alert('La nueva contraseña debe tener al menos 6 caracteres')
+      return
+    }
+  }
+
   saving.value = true
   try {
-    const payload = { ...form }
-    if (isEditing.value && !payload.password) {
-      delete payload.password // No enviar si no la cambia
+    const payload = {
+      ...form,
+      nombre: form.nombre,
+      email: form.email,
+      password: form.password || undefined
+    }
+    if (isEditing.value && !form.password) {
+      delete payload.password
     }
 
     if (isEditing.value) {

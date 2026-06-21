@@ -6,6 +6,13 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Database;
 
+/**
+ * JustificacionAppController — Justificaciones desde la app.
+ * Esquema v2:
+ *   - justificaciones.usuario_id (antes: usuario_app_id)
+ *   - justificaciones.estado_id FK → estados_justificacion (antes: estado ENUM)
+ *   - estados_justificacion: 1=PENDIENTE, 2=APROBADA, 3=RECHAZADA
+ */
 class JustificacionAppController extends BaseAppController
 {
     // Valida formato de una fecha
@@ -45,9 +52,10 @@ class JustificacionAppController extends BaseAppController
     public function index(Request $req): void
     {
         $stmt = $this->db->prepare("
-            SELECT j.*
+            SELECT j.*, ej.nombre AS estado_nombre
             FROM justificaciones j
-            WHERE j.usuario_app_id = :uid
+            INNER JOIN estados_justificacion ej ON ej.id = j.estado_id
+            WHERE j.usuario_id = :uid
             ORDER BY j.created_at DESC
         ");
         $stmt->execute([':uid' => $this->userId()]);
@@ -60,20 +68,11 @@ class JustificacionAppController extends BaseAppController
     public function store(Request $req): void
     {
         $userId  = $this->userId();
-        $tipo    = (string) $req->input('tipo');
         $fInicio = (string) $req->input('fecha_inicio');
         $fFin    = (string) $req->input('fecha_fin');
         $motivo  = (string) $req->input('motivo', '');
 
-        $tipos_validos = [
-            'ENFERMEDAD','PERMISO_PERSONAL','LICENCIA','COMISION_SERVICIO',
-            'CAPACITACION','DUELO','MATERNIDAD','PATERNIDAD','OLVIDO_MARCACION','OTRO'
-        ];
-
         $errors = [];
-
-        if (!in_array($tipo, $tipos_validos))
-            $errors[] = 'tipo inválido';
 
         $errors = array_merge($errors, $this->validarFechas($fInicio, $fFin));
 
@@ -86,14 +85,14 @@ class JustificacionAppController extends BaseAppController
         try {
             $this->db->beginTransaction();
 
+            // estado_id=1 → PENDIENTE
             $stmt = $this->db->prepare("
                 INSERT INTO justificaciones
-                    (usuario_app_id, tipo, fecha_inicio, fecha_fin, motivo, estado)
-                VALUES (:uid, :tipo, :fi, :ff, :motivo, 'PENDIENTE')
+                    (usuario_id, fecha_inicio, fecha_fin, motivo, estado_id)
+                VALUES (:uid, :fi, :ff, :motivo, 1)
             ");
             $stmt->execute([
                 ':uid'    => $userId,
-                ':tipo'   => $tipo,
                 ':fi'     => $fInicio,
                 ':ff'     => $fFin,
                 ':motivo' => $motivo,
@@ -120,9 +119,12 @@ class JustificacionAppController extends BaseAppController
     public function show(Request $req): void
     {
         $id   = (int) $req->param('id');
-        $stmt = $this->db->prepare(
-            "SELECT * FROM justificaciones WHERE id = :id AND usuario_app_id = :uid"
-        );
+        $stmt = $this->db->prepare("
+            SELECT j.*, ej.nombre AS estado_nombre
+            FROM justificaciones j
+            INNER JOIN estados_justificacion ej ON ej.id = j.estado_id
+            WHERE j.id = :id AND j.usuario_id = :uid
+        ");
         $stmt->execute([':id' => $id, ':uid' => $this->userId()]);
         $just = $stmt->fetch();
 
@@ -140,15 +142,18 @@ class JustificacionAppController extends BaseAppController
         $id  = (int) $req->param('id');
         $uid = $this->userId();
 
-        $stmt = $this->db->prepare(
-            "SELECT estado FROM justificaciones WHERE id = :id AND usuario_app_id = :uid"
-        );
+        $stmt = $this->db->prepare("
+            SELECT j.estado_id, ej.nombre AS estado_nombre
+            FROM justificaciones j
+            INNER JOIN estados_justificacion ej ON ej.id = j.estado_id
+            WHERE j.id = :id AND j.usuario_id = :uid
+        ");
         $stmt->execute([':id' => $id, ':uid' => $uid]);
         $just = $stmt->fetch();
 
         if (!$just)
             Response::notFound('Justificación no encontrada');
-        if ($just['estado'] !== 'PENDIENTE')
+        if ($just['estado_nombre'] !== 'PENDIENTE')
             Response::error('Solo se pueden eliminar justificaciones pendientes', 400);
 
         try {

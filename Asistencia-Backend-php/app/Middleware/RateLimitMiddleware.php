@@ -7,31 +7,67 @@ class RateLimitMiddleware
 {
     public static function check(string $action, int $maxAttempts = 5, int $decaySeconds = 300): void
     {
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
-        }
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        $db = Database::getInstance();
 
-        $key = 'rate_limit_' . $action;
-        if (!isset($_SESSION[$key])) {
-            $_SESSION[$key] = ['attempts' => 0, 'time' => time()];
-        }
+        try {
+            $stmt = $db->prepare("SELECT * FROM login_attempts WHERE ip = ? AND endpoint = ? LIMIT 1");
+            $stmt->execute([$ip, $action]);
+            $attempt = $stmt->fetch();
 
-        if (time() - $_SESSION[$key]['time'] > $decaySeconds) {
-            $_SESSION[$key] = ['attempts' => 0, 'time' => time()];
-        }
+            $now = time();
 
-        if ($_SESSION[$key]['attempts'] >= $maxAttempts) {
-            Response::error('Demasiados intentos. Por favor, espere unos minutos.', 429);
-        }
+            if ($attempt) {
+                $bloqueadoHasta = $attempt['bloqueado_hasta'] ? strtotime($attempt['bloqueado_hasta']) : null;
+                $ultimoIntento = strtotime($attempt['ultimo_intento']);
 
-        $_SESSION[$key]['attempts']++;
+                // Si está bloqueado actualmente
+                if ($bloqueadoHasta && $bloqueadoHasta > $now) {
+                    $espera = $bloqueadoHasta - $now;
+                    Response::error("Demasiados intentos. Por favor, espere {$espera} segundos.", 429);
+                    exit();
+                }
+
+                // Si ya pasó el tiempo de bloqueo o de decaimiento desde el último intento
+                if ($now - $ultimoIntento > $decaySeconds) {
+                    // Resetear contador
+                    $stmt = $db->prepare("UPDATE login_attempts SET intentos = 1, bloqueado_hasta = NULL, ultimo_intento = NOW() WHERE id = ?");
+                    $stmt->execute([$attempt['id']]);
+                } else {
+                    $nuevosIntentos = $attempt['intentos'] + 1;
+                    $bloqueo = null;
+                    if ($nuevosIntentos >= $maxAttempts) {
+                        $bloqueo = date('Y-m-d H:i:s', $now + $decaySeconds);
+                    }
+
+                    $stmt = $db->prepare("UPDATE login_attempts SET intentos = ?, bloqueado_hasta = ?, ultimo_intento = NOW() WHERE id = ?");
+                    $stmt->execute([$nuevosIntentos, $bloqueo, $attempt['id']]);
+
+                    if ($nuevosIntentos >= $maxAttempts) {
+                        Response::error("Demasiados intentos. Por favor, espere {$decaySeconds} segundos.", 429);
+                        exit();
+                    }
+                }
+            } else {
+                // Primer intento
+                $stmt = $db->prepare("INSERT INTO login_attempts (ip, endpoint, intentos, ultimo_intento) VALUES (?, ?, 1, NOW())");
+                $stmt->execute([$ip, $action]);
+            }
+        } catch (\Exception $e) {
+            // Si la BD falla, no bloquear acceso para no degradar el servicio, pero loguear el error
+            error_log("[RateLimitMiddleware] Error: " . $e->getMessage());
+        }
     }
 
     public static function clearAttempts(string $action): void
     {
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        try {
+            $db = Database::getInstance();
+            $stmt = $db->prepare("DELETE FROM login_attempts WHERE ip = ? AND endpoint = ?");
+            $stmt->execute([$ip, $action]);
+        } catch (\Exception $e) {
+            error_log("[RateLimitMiddleware::clearAttempts] Error: " . $e->getMessage());
         }
-        unset($_SESSION['rate_limit_' . $action]);
     }
 }

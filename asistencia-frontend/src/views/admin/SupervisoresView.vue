@@ -25,7 +25,7 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-200 bg-white">
-          <tr v-for="user in usuarios.filter(u => u.rol === 'supervisor')" :key="user.id" class="hover:bg-slate-50 transition-colors">
+          <tr v-for="user in supervisores" :key="user.id" class="hover:bg-slate-50 transition-colors">
             <td class="px-6 py-4 whitespace-nowrap">
               <div class="flex items-center">
                 <div class="flex-shrink-0 h-8 w-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 font-bold">
@@ -99,11 +99,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import api from '@/api/axios'
 
 const usuarios = ref([])
 const sedes = ref([])
+const supervisores = computed(() => usuarios.value.filter(u => u.rol === 'supervisor'))
 const loading = ref(true)
 const error = ref(null)
 const isModalOpen = ref(false)
@@ -154,19 +155,55 @@ const closeModal = () => {
 }
 
 const saveItem = async () => {
+  const nombre = form.nombre.trim()
+  const email = form.email.trim()
+  const password = form.password ? form.password.trim() : ''
+
+  if (!nombre) {
+    alert('El nombre completo es requerido')
+    return
+  }
+  if (!email) {
+    alert('El correo electrónico es requerido')
+    return
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(email)) {
+    alert('Ingrese un correo electrónico válido')
+    return
+  }
+  if (!form.sede_id) {
+    alert('Debe seleccionar una sede para el supervisor')
+    return
+  }
+  if (!isEditing.value) {
+    if (!password) {
+      alert('La contraseña es requerida')
+      return
+    }
+    if (password.length < 6) {
+      alert('La contraseña debe tener al menos 6 caracteres')
+      return
+    }
+  } else {
+    if (password && password.length < 6) {
+      alert('La nueva contraseña debe tener al menos 6 caracteres')
+      return
+    }
+  }
+
   saving.value = true
   try {
-    const payload = { ...form }
-    if (isEditing.value && !payload.password) {
-      delete payload.password
+    const payload = {
+      ...form,
+      nombre,
+      email,
+      password: password || undefined,
+      estado: (form.estado || 'INACTIVO').toUpperCase(),
+      rol: 'supervisor'
     }
-    payload.estado = (payload.estado || 'INACTIVO').toUpperCase()
-    payload.rol = 'supervisor'
-    // Asegurar que sede_id se envíe al crear
-    if (!isEditing.value && !payload.sede_id) {
-      alert('Debe seleccionar una sede para el supervisor')
-      saving.value = false
-      return
+    if (isEditing.value && !password) {
+      delete payload.password
     }
 
     if (isEditing.value) {

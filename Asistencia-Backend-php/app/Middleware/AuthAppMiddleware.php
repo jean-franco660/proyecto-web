@@ -1,10 +1,10 @@
 <?php
+declare(strict_types=1);
 
 namespace App\Middleware;
 
 use App\Core\Response;
-use Firebase\JWT\JWT;
-use Firebase\JWT\Key;
+use App\Services\JwtService;
 use Firebase\JWT\ExpiredException;
 
 class AuthAppMiddleware
@@ -16,9 +16,16 @@ class AuthAppMiddleware
             Response::unauthorized('Token requerido');
         }
 
+        $token = $m[1];
+        $jwtService = new JwtService();
+
+        // Verificar blacklist
+        if ($jwtService->isBlacklisted($token, 'app')) {
+            Response::unauthorized('Token revocado');
+        }
+
         try {
-            $decoded = JWT::decode($m[1], new Key($_ENV['JWT_SECRET'], 'HS256'));
-            $payload = (array) $decoded;
+            $payload = $jwtService->decodeToken($token);
 
             // Verificar que es token de app
             if (($payload['tipo'] ?? '') !== 'app') {

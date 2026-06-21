@@ -5,7 +5,13 @@
  * Único punto de entrada a la aplicación
  */
 
-define('BASE_PATH', dirname(__DIR__));
+// Intentar cargar desde la carpeta hermana (entorno cPanel) o localmente
+$siblingPath = dirname(__DIR__) . '/asistencia-backend';
+if (file_exists($siblingPath . '/vendor/autoload.php')) {
+    define('BASE_PATH', $siblingPath);
+} else {
+    define('BASE_PATH', dirname(__DIR__));
+}
 
 // Cargar autoloader de Composer
 require BASE_PATH . '/vendor/autoload.php';

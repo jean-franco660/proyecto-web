@@ -5,8 +5,28 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Database;
 
+/**
+ * UsuarioAppController — Gestión de trabajadores.
+ * Esquema v2: usuarios + usuario_roles (TRABAJADOR) + usuarios_trabajador + usuario_sede.
+ * Ya no existen: usuarios_app, usuario_app_sede.
+ */
 class UsuarioAppController extends BaseWebController
 {
+    /**
+     * Helper: IDs de sedes del supervisor actual.
+     * Esquema v2: supervisor también usa usuario_sede.
+     */
+    private function sedesDelSupervisor(): array
+    {
+        $stmt = $this->db->prepare("
+            SELECT us.sede_id FROM usuario_sede us
+            WHERE us.usuario_id = :uid AND us.estado = 1
+              AND (us.fecha_fin IS NULL OR us.fecha_fin >= CURDATE())
+        ");
+        $stmt->execute([':uid' => $this->userId()]);
+        return array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'sede_id');
+    }
+
     /** GET /v1/web/usuarios-app — listar trabajadores con su sede y horario */
     public function index(Request $req): void
     {
@@ -19,22 +39,48 @@ class UsuarioAppController extends BaseWebController
         $whereClause = "1=1";
         $params = [];
 
+        // Filtrar solo trabajadores
+        $whereClause .= " AND EXISTS (
+            SELECT 1 FROM usuario_roles ur2
+            INNER JOIN roles r2 ON r2.id = ur2.rol_id
+            WHERE ur2.usuario_id = u.id AND r2.nombre = 'TRABAJADOR'
+        )";
+
         if ($this->rol() === 'supervisor') {
-            $whereClause .= " AND EXISTS (SELECT 1 FROM usuario_app_sede uas WHERE uas.usuario_app_id = u.id AND uas.sede_id IN (SELECT sede_id FROM usuario_web_sede WHERE usuario_web_id = :uid AND activo = 1) AND uas.estado = 'ACTIVO')";
-            $params[':uid'] = $this->userId();
+            $misSedes = $this->sedesDelSupervisor();
+            if (empty($misSedes)) {
+                Response::success(['current_page' => $page, 'data' => [], 'total' => 0, 'last_page' => 1, 'per_page' => $perPage]);
+                return;
+            }
+            $in = implode(',', array_map('intval', $misSedes));
+            $whereClause .= " AND EXISTS (
+                SELECT 1 FROM usuario_sede usf
+                WHERE usf.usuario_id = u.id AND usf.sede_id IN ({$in})
+                  AND usf.estado = 1 AND (usf.fecha_fin IS NULL OR usf.fecha_fin >= CURDATE())
+            )";
         }
 
         if ($sedeId) {
-            $whereClause .= " AND EXISTS (SELECT 1 FROM usuario_app_sede uas WHERE uas.usuario_app_id = u.id AND uas.sede_id = :sid AND uas.estado = 'ACTIVO')";
+            $whereClause .= " AND EXISTS (
+                SELECT 1 FROM usuario_sede usf
+                WHERE usf.usuario_id = u.id AND usf.sede_id = :sid
+                  AND usf.estado = 1 AND (usf.fecha_fin IS NULL OR usf.fecha_fin >= CURDATE())
+            )";
             $params[':sid'] = (int) $sedeId;
         }
         if ($search) {
-            $whereClause .= " AND (u.nombres LIKE :q OR u.apellido_paterno LIKE :q OR u.codigo_empleado LIKE :q)";
+            $whereClause .= " AND (ut.nombres LIKE :q OR ut.apellidos LIKE :q OR u.codigo_empleado LIKE :q)";
             $params[':q'] = "%{$search}%";
         }
 
         // Count totals
-        $stmtCount = $this->db->prepare("SELECT COUNT(*) FROM usuarios_app u WHERE {$whereClause}");
+        $stmtCount = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM usuarios u
+            LEFT JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
+            INNER JOIN estados_usuario eu ON eu.id = u.estado_id
+            WHERE {$whereClause}
+        ");
         foreach ($params as $k => $v) $stmtCount->bindValue($k, $v);
         $stmtCount->execute();
         $total = (int) $stmtCount->fetchColumn();
@@ -42,13 +88,15 @@ class UsuarioAppController extends BaseWebController
         // Query data
         $sql = "
             SELECT u.id, u.codigo_empleado AS codigo,
-                   CONCAT(u.nombres, ' ', u.apellido_paterno, ' ', IFNULL(u.apellido_materno, '')) AS nombre_completo,
-                   u.nombres, u.apellido_paterno, u.apellido_materno,
-                   u.dni, u.estado, u.cargo,
-                   IF(u.estado='ACTIVO', 1, 0) AS acceso_habilitado
-            FROM usuarios_app u
+                   CONCAT(IFNULL(ut.nombres,''), ' ', IFNULL(ut.apellidos,'')) AS nombre_completo,
+                   ut.nombres, ut.apellidos,
+                   ut.dni, eu.nombre AS estado,
+                   u.estado_id
+            FROM usuarios u
+            LEFT JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
+            INNER JOIN estados_usuario eu ON eu.id = u.estado_id
             WHERE {$whereClause}
-            ORDER BY u.apellido_paterno, u.nombres
+            ORDER BY ut.apellidos, ut.nombres
             LIMIT :limit OFFSET :offset
         ";
         
@@ -59,29 +107,32 @@ class UsuarioAppController extends BaseWebController
         $stmt->execute();
         $users = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
-        // Query institutions/assignments
+        // Query sede assignments
         if ($users) {
             $userIds = array_column($users, 'id');
             $inClause = implode(',', $userIds);
             $stmtSedes = $this->db->query("
-                SELECT uas.usuario_app_id, s.id, s.nombre, s.codigo_sede AS codigo_modular_ie, uas.cargo, uas.estado, uas.fecha_inicio, uas.fecha_fin, uas.id AS pivot_id
-                FROM usuario_app_sede uas
-                JOIN sedes s ON s.id = uas.sede_id
-                WHERE uas.usuario_app_id IN ($inClause)
+                SELECT us.usuario_id, s.id, s.nombre, s.codigo,
+                       us.estado, us.fecha_inicio, us.fecha_fin, us.id AS pivot_id,
+                       hs.nombre AS horario_nombre
+                FROM usuario_sede us
+                JOIN sedes s ON s.id = us.sede_id
+                LEFT JOIN horarios_sede hs ON hs.id = us.horario_id
+                WHERE us.usuario_id IN ($inClause)
             ");
             $sedesList = $stmtSedes->fetchAll(\PDO::FETCH_ASSOC);
             $sedesByUser = [];
             foreach ($sedesList as $s) {
-                $sedesByUser[$s['usuario_app_id']][] = [
+                $sedesByUser[$s['usuario_id']][] = [
                     'id' => $s['id'],
                     'nombre' => $s['nombre'],
-                    'codigo_modular_ie' => $s['codigo_modular_ie'],
+                    'codigo' => $s['codigo'],
                     'pivot' => [
                         'id' => $s['pivot_id'],
-                        'cargo' => $s['cargo'],
                         'estado' => $s['estado'],
                         'fecha_inicio' => $s['fecha_inicio'],
-                        'fecha_fin' => $s['fecha_fin']
+                        'fecha_fin' => $s['fecha_fin'],
+                        'horario_nombre' => $s['horario_nombre']
                     ]
                 ];
             }
@@ -104,31 +155,47 @@ class UsuarioAppController extends BaseWebController
     {
         $id   = (int) $req->param('id');
         $stmt = $this->db->prepare("
-            SELECT u.id, u.codigo_empleado AS codigo, u.codigo_empleado AS codigo_modular,
-                   CONCAT(u.nombres, ' ', u.apellido_paterno, ' ', IFNULL(u.apellido_materno, '')) AS nombre_completo,
-                   u.nombres, u.apellido_paterno, u.apellido_materno,
-                   u.dni, u.estado,
-                   IF(u.estado='ACTIVO', 1, 0) AS acceso_habilitado
-            FROM usuarios_app u
-            WHERE u.id = :id
+            SELECT u.id, u.codigo_empleado AS codigo,
+                   CONCAT(IFNULL(ut.nombres,''), ' ', IFNULL(ut.apellidos,'')) AS nombre_completo,
+                   ut.nombres, ut.apellidos,
+                   ut.dni, ut.telefono, eu.nombre AS estado,
+                   u.estado_id
+            FROM usuarios u
+            LEFT JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
+            INNER JOIN estados_usuario eu ON eu.id = u.estado_id
+            INNER JOIN usuario_roles ur ON ur.usuario_id = u.id
+            INNER JOIN roles r ON r.id = ur.rol_id
+            WHERE u.id = :id AND r.nombre = 'TRABAJADOR'
         ");
         $stmt->execute([':id' => $id]);
         $u = $stmt->fetch(\PDO::FETCH_ASSOC);
         if (!$u) Response::notFound('Trabajador no encontrado');
 
         if ($this->rol() === 'supervisor') {
-            $stmtChk = $this->db->prepare("SELECT 1 FROM usuario_app_sede uas WHERE uas.usuario_app_id = ? AND uas.sede_id IN (SELECT sede_id FROM usuario_web_sede WHERE usuario_web_id = ? AND activo = 1) AND uas.estado = 'ACTIVO'");
-            $stmtChk->execute([$id, $this->userId()]);
+            $misSedes = $this->sedesDelSupervisor();
+            if (empty($misSedes)) {
+                Response::error('Sin acceso a este trabajador', 403);
+            }
+            $in = implode(',', array_map('intval', $misSedes));
+            $stmtChk = $this->db->prepare("
+                SELECT 1 FROM usuario_sede
+                WHERE usuario_id = ? AND sede_id IN ({$in})
+                  AND estado = 1 AND (fecha_fin IS NULL OR fecha_fin >= CURDATE())
+            ");
+            $stmtChk->execute([$id]);
             if (!$stmtChk->fetch()) {
                 Response::error('Sin acceso a este trabajador', 403);
             }
         }
         
         $stmtSedes = $this->db->prepare("
-            SELECT s.id, s.nombre, s.codigo_sede AS codigo_modular_ie, uas.cargo, uas.estado, uas.fecha_inicio, uas.fecha_fin, uas.id AS pivot_id
-            FROM usuario_app_sede uas
-            JOIN sedes s ON s.id = uas.sede_id
-            WHERE uas.usuario_app_id = :id
+            SELECT s.id, s.nombre, s.codigo,
+                   us.estado, us.fecha_inicio, us.fecha_fin, us.id AS pivot_id,
+                   hs.nombre AS horario_nombre
+            FROM usuario_sede us
+            JOIN sedes s ON s.id = us.sede_id
+            LEFT JOIN horarios_sede hs ON hs.id = us.horario_id
+            WHERE us.usuario_id = :id
         ");
         $stmtSedes->execute([':id' => $id]);
         $sedesList = $stmtSedes->fetchAll(\PDO::FETCH_ASSOC);
@@ -137,13 +204,13 @@ class UsuarioAppController extends BaseWebController
             $sedes[] = [
                 'id' => $s['id'],
                 'nombre' => $s['nombre'],
-                'codigo_modular_ie' => $s['codigo_modular_ie'],
+                'codigo' => $s['codigo'],
                 'pivot' => [
                     'id' => $s['pivot_id'],
-                    'cargo' => $s['cargo'],
                     'estado' => $s['estado'],
                     'fecha_inicio' => $s['fecha_inicio'],
-                    'fecha_fin' => $s['fecha_fin']
+                    'fecha_fin' => $s['fecha_fin'],
+                    'horario_nombre' => $s['horario_nombre']
                 ]
             ];
         }
@@ -155,70 +222,67 @@ class UsuarioAppController extends BaseWebController
     public function store(Request $req): void
     {
         $nombres    = (string) $req->input('nombres');
-        $apPaterno  = (string) $req->input('apellido_paterno');
-        $apMaterno  = (string) $req->input('apellido_materno', '');
+        $apellidos  = (string) $req->input('apellidos');
         $codigo     = (string) $req->input('codigo_modular');
-        $email      = strtolower(trim((string) $req->input('email', $codigo.'@asistencia.com')));
+        $email      = strtolower(trim((string) $req->input('email', '')));
         $dni        = (string) $req->input('dni', '');
+        $telefono   = (string) $req->input('telefono', '');
         $password   = (string) $req->input('password');
 
         $errors = [];
         if (!$nombres)   $errors[] = 'nombres es requerido';
-        if (!$apPaterno) $errors[] = 'apellido_paterno es requerido';
+        if (!$apellidos) $errors[] = 'apellidos es requerido';
         if (!$codigo)    $errors[] = 'codigo_modular es requerido';
         if ($errors) Response::unprocessable('Datos incompletos', $errors);
 
-        // Verificar unicidad
-        $stmt = $this->db->prepare("SELECT id FROM usuarios_app WHERE email = ? OR codigo_empleado = ?");
-        $stmt->execute([$email, $codigo]);
-        if ($stmt->fetch(\PDO::FETCH_ASSOC)) Response::error('El email o código modular ya existe', 422);
+        // Si no hay email, generar uno basado en código
+        if (!$email) $email = $codigo . '@asistencia.local';
 
-        $asignaciones = $req->input('asignaciones', []);
-        if ($this->rol() === 'supervisor' && is_array($asignaciones)) {
-            foreach ($asignaciones as $asig) {
-                if (empty($asig['institucion_id']) || !is_numeric($asig['institucion_id'])) {
-                    Response::unprocessable('institucion_id inválido en asignaciones');
-                }
-                $stmtChk = $this->db->prepare("SELECT 1 FROM usuario_web_sede WHERE usuario_web_id = ? AND sede_id = ? AND activo = 1");
-                $stmtChk->execute([$this->userId(), (int)$asig['institucion_id']]);
-                if (!$stmtChk->fetch()) {
-                    Response::error('No tienes permiso para asignar trabajadores a esta sede', 403);
-                }
-            }
-        }
+        // Verificar unicidad en tabla usuarios
+        $stmt = $this->db->prepare("SELECT id FROM usuarios WHERE email = ? OR codigo_empleado = ?");
+        $stmt->execute([$email, $codigo]);
+        if ($stmt->fetch(\PDO::FETCH_ASSOC)) Response::error('El email o código ya existe', 422);
 
         $this->db->beginTransaction();
         try {
-            $stmt = $this->db->prepare("
-                INSERT INTO usuarios_app
-                    (nombres, apellido_paterno, apellido_materno, codigo_empleado, email, dni, password, estado)
-                VALUES (:n, :ap, :am, :cod, :email, :dni, :pwd, 'ACTIVO')
-            ");
+            // Crear usuario base (estado_id=1 → ACTIVO)
             $pw = $password ? password_hash($password, PASSWORD_BCRYPT) : password_hash($dni ?: $codigo, PASSWORD_BCRYPT);
+            $stmt = $this->db->prepare("
+                INSERT INTO usuarios (email, codigo_empleado, password, estado_id)
+                VALUES (:email, :cod, :pwd, 1)
+            ");
             $stmt->execute([
-                ':n'    => $nombres,
-                ':ap'   => $apPaterno,
-                ':am'   => $apMaterno,
-                ':cod'  => $codigo,
-                ':email'=> $email,
-                ':dni'  => $dni,
-                ':pwd'  => $pw,
+                ':email' => $email,
+                ':cod'   => $codigo,
+                ':pwd'   => $pw,
             ]);
-            
             $userId = (int) $this->db->lastInsertId();
 
+            // Asignar rol TRABAJADOR (id=3)
+            $this->db->prepare("INSERT INTO usuario_roles (usuario_id, rol_id) VALUES (?, 3)")
+                ->execute([$userId]);
+
+            // Crear perfil de trabajador
+            $this->db->prepare("
+                INSERT INTO usuarios_trabajador (usuario_id, nombres, apellidos, dni, telefono)
+                VALUES (?, ?, ?, ?, ?)
+            ")->execute([$userId, $nombres, $apellidos, $dni ?: null, $telefono ?: null]);
+
+            // Crear asignaciones a sedes
             $asignaciones = $req->input('asignaciones', []);
             if (is_array($asignaciones)) {
                 $stmtAsig = $this->db->prepare("
-                    INSERT INTO usuario_app_sede (usuario_app_id, sede_id, cargo, estado, fecha_inicio, fecha_fin)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO usuario_sede (usuario_id, sede_id, horario_id, fecha_inicio, fecha_fin, estado)
+                    VALUES (?, ?, ?, ?, ?, 1)
                 ");
                 foreach ($asignaciones as $asig) {
+                    $sedeId = (int)($asig['institucion_id'] ?? 0);
+                    $horarioId = (int)($asig['horario_id'] ?? 0);
+                    if (!$sedeId || !$horarioId) continue;
                     $stmtAsig->execute([
                         $userId,
-                        $asig['institucion_id'],
-                        $asig['cargo'] ?? 'DOCENTE',
-                        $asig['estado'] ?? 'ACTIVO',
+                        $sedeId,
+                        $horarioId,
                         $asig['fecha_inicio'] ?? date('Y-m-d'),
                         $asig['fecha_fin'] ?? null
                     ]);
@@ -238,68 +302,87 @@ class UsuarioAppController extends BaseWebController
     public function update(Request $req): void
     {
         $id = (int) $req->param('id');
-        $stmt = $this->db->prepare("SELECT id FROM usuarios_app WHERE id = ?");
+
+        // Verificar existencia
+        $stmt = $this->db->prepare("
+            SELECT u.id FROM usuarios u
+            INNER JOIN usuario_roles ur ON ur.usuario_id = u.id
+            INNER JOIN roles r ON r.id = ur.rol_id
+            WHERE u.id = ? AND r.nombre = 'TRABAJADOR'
+        ");
         $stmt->execute([$id]);
         if (!$stmt->fetch(\PDO::FETCH_ASSOC)) Response::notFound('Trabajador no encontrado');
 
         if ($this->rol() === 'supervisor') {
-            $stmtChk = $this->db->prepare("SELECT 1 FROM usuario_app_sede uas WHERE uas.usuario_app_id = ? AND uas.sede_id IN (SELECT sede_id FROM usuario_web_sede WHERE usuario_web_id = ? AND activo = 1) AND uas.estado = 'ACTIVO'");
-            $stmtChk->execute([$id, $this->userId()]);
+            $misSedes = $this->sedesDelSupervisor();
+            if (empty($misSedes)) Response::error('Sin acceso a este trabajador', 403);
+            $in = implode(',', array_map('intval', $misSedes));
+            $stmtChk = $this->db->prepare("
+                SELECT 1 FROM usuario_sede
+                WHERE usuario_id = ? AND sede_id IN ({$in})
+                  AND estado = 1 AND (fecha_fin IS NULL OR fecha_fin >= CURDATE())
+            ");
+            $stmtChk->execute([$id]);
             if (!$stmtChk->fetch()) {
                 Response::error('Sin acceso a este trabajador', 403);
             }
         }
 
-        $campos = [];
-        $params = [];
-        
-        $nombres    = $req->input('nombres');
-        $apPaterno  = $req->input('apellido_paterno');
-        $apMaterno  = $req->input('apellido_materno');
-        $codigo     = $req->input('codigo_modular');
-        $email      = $req->input('email');
-        $dni        = $req->input('dni');
-        $password   = $req->input('password');
-        
-        if ($nombres !== null) { $campos[] = "`nombres` = ?"; $params[] = $nombres; }
-        if ($apPaterno !== null) { $campos[] = "`apellido_paterno` = ?"; $params[] = $apPaterno; }
-        if ($apMaterno !== null) { $campos[] = "`apellido_materno` = ?"; $params[] = $apMaterno; }
-        if ($codigo !== null) { $campos[] = "`codigo_empleado` = ?"; $params[] = $codigo; }
-        if ($email !== null) { $campos[] = "`email` = ?"; $params[] = $email; }
-        if ($dni !== null) { $campos[] = "`dni` = ?"; $params[] = $dni; }
-        if ($password !== null && trim($password) !== '') {
-            $campos[] = "`password` = ?";
-            $params[] = password_hash($password, PASSWORD_BCRYPT);
-        }
-
         $this->db->beginTransaction();
         try {
-            if (!empty($campos)) {
-                $params[] = $id;
-                $this->db->prepare("UPDATE usuarios_app SET " . implode(', ', $campos) . " WHERE id = ?")->execute($params);
+            // Actualizar tabla usuarios
+            $camposUser = [];
+            $paramsUser = [];
+            $codigo = $req->input('codigo_modular');
+            $email  = $req->input('email');
+            $pass   = $req->input('password');
+
+            if ($codigo !== null) { $camposUser[] = "`codigo_empleado` = ?"; $paramsUser[] = $codigo; }
+            if ($email !== null)  { $camposUser[] = "`email` = ?"; $paramsUser[] = strtolower(trim($email)); }
+            if ($pass !== null && trim($pass) !== '') {
+                $camposUser[] = "`password` = ?";
+                $paramsUser[] = password_hash($pass, PASSWORD_BCRYPT);
+            }
+            if ($camposUser) {
+                $paramsUser[] = $id;
+                $this->db->prepare("UPDATE usuarios SET " . implode(', ', $camposUser) . " WHERE id = ?")
+                    ->execute($paramsUser);
             }
 
+            // Actualizar perfil de trabajador
+            $camposPerfil = [];
+            $paramsPerfil = [];
+            $nombres   = $req->input('nombres');
+            $apellidos = $req->input('apellidos');
+            $dni       = $req->input('dni');
+            $telefono  = $req->input('telefono');
+
+            if ($nombres !== null)   { $camposPerfil[] = "`nombres` = ?"; $paramsPerfil[] = $nombres; }
+            if ($apellidos !== null)  { $camposPerfil[] = "`apellidos` = ?"; $paramsPerfil[] = $apellidos; }
+            if ($dni !== null)       { $camposPerfil[] = "`dni` = ?"; $paramsPerfil[] = $dni; }
+            if ($telefono !== null)  { $camposPerfil[] = "`telefono` = ?"; $paramsPerfil[] = $telefono; }
+
+            if ($camposPerfil) {
+                $paramsPerfil[] = $id;
+                $this->db->prepare("UPDATE usuarios_trabajador SET " . implode(', ', $camposPerfil) . " WHERE usuario_id = ?")
+                    ->execute($paramsPerfil);
+            }
+
+            // Asignaciones de sedes
             $asignaciones = $req->input('asignaciones');
             if (is_array($asignaciones)) {
-                if ($this->rol() === 'supervisor') {
-                    foreach ($asignaciones as $asig) {
-                        if (empty($asig['institucion_id']) || !is_numeric($asig['institucion_id'])) {
-                            Response::unprocessable('institucion_id inválido en asignaciones');
-                        }
-                        $stmtChk = $this->db->prepare("SELECT 1 FROM usuario_web_sede WHERE usuario_web_id = ? AND sede_id = ? AND activo = 1");
-                        $stmtChk->execute([$this->userId(), (int)$asig['institucion_id']]);
-                        if (!$stmtChk->fetch()) {
-                            Response::error('No tienes permiso para asignar trabajadores a esta sede', 403);
-                        }
-                    }
-                }
-                $stmtAsig = $this->db->prepare("INSERT INTO usuario_app_sede (usuario_app_id, sede_id, cargo, estado, fecha_inicio, fecha_fin) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmtAsig = $this->db->prepare("
+                    INSERT INTO usuario_sede (usuario_id, sede_id, horario_id, fecha_inicio, fecha_fin, estado)
+                    VALUES (?, ?, ?, ?, ?, 1)
+                ");
                 foreach ($asignaciones as $asig) {
+                    $sedeId = (int)($asig['institucion_id'] ?? 0);
+                    $horarioId = (int)($asig['horario_id'] ?? 0);
+                    if (!$sedeId || !$horarioId) continue;
                     $stmtAsig->execute([
                         $id,
-                        (int)$asig['institucion_id'],
-                        $asig['cargo'] ?? 'DOCENTE',
-                        $asig['estado'] ?? 'ACTIVO',
+                        $sedeId,
+                        $horarioId,
                         $asig['fecha_inicio'] ?? date('Y-m-d'),
                         $asig['fecha_fin'] ?? null
                     ]);
@@ -319,13 +402,15 @@ class UsuarioAppController extends BaseWebController
     public function cambiarEstado(Request $req): void
     {
         $id     = (int) $req->param('id');
-        $estado = (string) $req->input('estado'); // ACTIVO | INACTIVO
+        $estado = strtoupper(trim((string) $req->input('estado')));
 
-        if (!in_array($estado, ['ACTIVO', 'INACTIVO']))
-            Response::unprocessable('Estado inválido. Use ACTIVO o INACTIVO');
+        $estadoMap = ['ACTIVO' => 1, 'INACTIVO' => 2, 'BLOQUEADO' => 3];
+        $estadoId = $estadoMap[$estado] ?? null;
+        if (!$estadoId)
+            Response::unprocessable('Estado inválido. Use ACTIVO, INACTIVO o BLOQUEADO');
 
-        $stmt = $this->db->prepare("UPDATE usuarios_app SET estado = ? WHERE id = ?");
-        $stmt->execute([$estado, $id]);
+        $stmt = $this->db->prepare("UPDATE usuarios SET estado_id = ? WHERE id = ?");
+        $stmt->execute([$estadoId, $id]);
         Response::success(null, "Estado cambiado a {$estado}");
     }
 
@@ -334,21 +419,24 @@ class UsuarioAppController extends BaseWebController
     {
         $id        = (int) $req->param('id');
         $sedeId    = (int) $req->input('sede_id');
-        $horarioId = $req->input('horario_sede_id') ? (int) $req->input('horario_sede_id') : null;
-        $cargo     = (string) $req->input('cargo', '');
+        $horarioId = (int) $req->input('horario_id');
 
         if (!$sedeId) Response::unprocessable('sede_id es requerido');
+        if (!$horarioId) Response::unprocessable('horario_id es requerido');
 
         $this->db->beginTransaction();
         try {
-            // Desactivar asignación anterior
-            $this->db->prepare("UPDATE usuario_app_sede SET estado = 'INACTIVO' WHERE usuario_app_id = ? AND sede_id = ?")->execute([$id, $sedeId]);
+            // Cerrar asignación anterior (fecha_fin = hoy)
+            $this->db->prepare("
+                UPDATE usuario_sede SET estado = 0, fecha_fin = CURDATE()
+                WHERE usuario_id = ? AND sede_id = ? AND estado = 1
+            ")->execute([$id, $sedeId]);
 
             // Crear nueva asignación
             $this->db->prepare("
-                INSERT INTO usuario_app_sede (usuario_app_id, sede_id, horario_sede_id, cargo, estado)
-                VALUES (?, ?, ?, ?, 'ACTIVO')
-            ")->execute([$id, $sedeId, $horarioId, $cargo]);
+                INSERT INTO usuario_sede (usuario_id, sede_id, horario_id, fecha_inicio, estado)
+                VALUES (?, ?, ?, CURDATE(), 1)
+            ")->execute([$id, $sedeId, $horarioId]);
 
             $this->db->commit();
         } catch (\Exception $e) {
@@ -364,7 +452,8 @@ class UsuarioAppController extends BaseWebController
     public function inactivarAsignacion(Request $req): void
     {
         $pivotId = (int) $req->param('id');
-        $this->db->prepare("UPDATE usuario_app_sede SET estado = 'INACTIVO', fecha_fin = CURRENT_DATE WHERE id = ?")->execute([$pivotId]);
+        $this->db->prepare("UPDATE usuario_sede SET estado = 0, fecha_fin = CURDATE() WHERE id = ?")
+            ->execute([$pivotId]);
         Response::success(null, 'Asignación inactivada correctamente');
     }
 
@@ -384,7 +473,256 @@ class UsuarioAppController extends BaseWebController
     public function destroy(Request $req): void
     {
         $id = (int) $req->param('id');
-        $this->db->prepare("UPDATE usuarios_app SET estado = 'INACTIVO' WHERE id = ?")->execute([$id]);
+        // Soft delete: cambiar estado a INACTIVO (id=2)
+        $this->db->prepare("UPDATE usuarios SET estado_id = 2 WHERE id = ?")->execute([$id]);
         Response::success(null, 'Trabajador desactivado correctamente');
+    }
+
+    /** GET /v1/web/password-resets-app */
+    public function listarPasswordResets(Request $req): void
+    {
+        $estado = $req->query('estado', 'PENDIENTE');
+        
+        $sql = "
+            SELECT pra.id, pra.usuario_id, pra.estado, pra.created_at,
+                   u.codigo_empleado, ut.nombres, ut.apellidos, ut.dni
+            FROM password_resets_app pra
+            INNER JOIN usuarios u ON u.id = pra.usuario_id
+            INNER JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
+            WHERE pra.estado = :estado
+            ORDER BY pra.created_at DESC
+        ";
+        
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([':estado' => $estado]);
+        Response::success($stmt->fetchAll(\PDO::FETCH_ASSOC));
+    }
+
+    /** POST /v1/web/password-resets-app/{id}/aprobar */
+    public function aprobarPasswordReset(Request $req): void
+    {
+        $id = (int) $req->param('id');
+        
+        $stmt = $this->db->prepare("SELECT * FROM password_resets_app WHERE id = ?");
+        $stmt->execute([$id]);
+        $reset = $stmt->fetch(\PDO::FETCH_ASSOC);
+        
+        if (!$reset) {
+            Response::notFound('Solicitud de recuperación no encontrada');
+        }
+        if ($reset['estado'] !== 'PENDIENTE') {
+            Response::error('Esta solicitud ya fue procesada', 400);
+        }
+        
+        // Generar clave temporal de 6 dígitos
+        $tempPassword = (string) rand(100000, 999999);
+        $hash = password_hash($tempPassword, PASSWORD_BCRYPT);
+        
+        $this->db->beginTransaction();
+        try {
+            // Actualizar estado de solicitud
+            $this->db->prepare("UPDATE password_resets_app SET estado = 'APROBADA' WHERE id = ?")->execute([$id]);
+            
+            // Actualizar contraseña del trabajador y forzar cambio
+            $this->db->prepare("
+                UPDATE usuarios 
+                SET password = ?, debe_cambiar_password = 1 
+                WHERE id = ?
+            ")->execute([$hash, $reset['usuario_id']]);
+            
+            $this->db->commit();
+            
+            Response::success([
+                'temp_password' => $tempPassword
+            ], 'Solicitud aprobada. Proporcione la contraseña temporal al trabajador.');
+            
+        } catch (\Exception $e) {
+            $this->db->rollBack();
+            error_log('[UsuarioAppController::aprobarPasswordReset] Error: ' . $e->getMessage());
+            Response::error('Error al procesar la aprobación.', 500);
+        }
+    }
+
+    /** POST /v1/web/password-resets-app/{id}/rechazar */
+    public function rechazarPasswordReset(Request $req): void
+    {
+        $id = (int) $req->param('id');
+        
+        $stmt = $this->db->prepare("SELECT * FROM password_resets_app WHERE id = ?");
+        $stmt->execute([$id]);
+        $reset = $stmt->fetch(\PDO::FETCH_ASSOC);
+        
+        if (!$reset) {
+            Response::notFound('Solicitud de recuperación no encontrada');
+        }
+        if ($reset['estado'] !== 'PENDIENTE') {
+            Response::error('Esta solicitud ya fue procesada', 400);
+        }
+        
+        $this->db->prepare("UPDATE password_resets_app SET estado = 'RECHAZADA' WHERE id = ?")->execute([$id]);
+        Response::success(null, 'Solicitud rechazada correctamente');
+    }
+
+    /** POST /v1/web/usuarios-app/import */
+    public function importar(Request $req): void
+    {
+        if (empty($_FILES['file']['tmp_name'])) {
+            Response::error('Debe subir un archivo CSV', 400);
+        }
+
+        $filePath = $_FILES['file']['tmp_name'];
+        
+        $delim = ',';
+        $fileHandle = fopen($filePath, 'r');
+        if ($fileHandle) {
+            $firstLine = fgets($fileHandle);
+            if (strpos($firstLine, ';') !== false) {
+                $delim = ';';
+            }
+            rewind($fileHandle);
+        }
+
+        $headers = fgetcsv($fileHandle, 1000, $delim);
+        if (!$headers) {
+            fclose($fileHandle);
+            Response::error('Archivo vacío o inválido', 400);
+        }
+
+        $headers[0] = preg_replace('/[\x{00EF}\x{00BB}\x{00BF}]/u', '', $headers[0]);
+        $headers = array_map('trim', $headers);
+
+        $totalProcesados = 0;
+        $exitosos = 0;
+        $errores = [];
+
+        while (($row = fgetcsv($fileHandle, 1000, $delim)) !== false) {
+            $totalProcesados++;
+            
+            // Pad row if it has fewer elements than headers
+            if (count($row) < count($headers)) {
+                $row = array_pad($row, count($headers), '');
+            }
+            
+            $data = array_combine($headers, array_slice(array_map('trim', $row), 0, count($headers)));
+
+            $codigo = $data['codigo_empleado'] ?? '';
+            $nombres = $data['nombres'] ?? '';
+            $apellidos = $data['apellidos'] ?? '';
+            $dni = $data['dni'] ?? '';
+            $email = isset($data['email']) ? strtolower(trim($data['email'])) : '';
+            $telefono = $data['telefono'] ?? '';
+            $password = $data['password'] ?? '';
+            $cargo = $data['cargo'] ?? 'DOCENTE';
+            $condicion = $data['condicion_laboral'] ?? '';
+            $sedeCodigo = $data['sede_codigo'] ?? '';
+            $horarioNombre = $data['horario_nombre'] ?? '';
+
+            if (empty($codigo) || empty($nombres) || empty($apellidos) || empty($dni)) {
+                $errores[] = "Fila {$totalProcesados}: El código_empleado, nombres, apellidos y DNI son obligatorios.";
+                continue;
+            }
+
+            if (empty($email)) {
+                $email = $codigo . '@asistencia.local';
+            }
+
+            $this->db->beginTransaction();
+            try {
+                // Check if user exists by employee code or email
+                $stmt = $this->db->prepare("SELECT id FROM usuarios WHERE codigo_empleado = ? OR email = ?");
+                $stmt->execute([$codigo, $email]);
+                $existingUser = $stmt->fetch();
+
+                if ($existingUser) {
+                    $userId = $existingUser['id'];
+                    // Update user profile
+                    $stmtUpPerfil = $this->db->prepare("
+                        UPDATE usuarios_trabajador 
+                        SET nombres = ?, apellidos = ?, DNI = ?, telefono = ? 
+                        WHERE usuario_id = ?
+                    ");
+                    $stmtUpPerfil->execute([$nombres, $apellidos, $dni, $telefono ?: null, $userId]);
+                    
+                    if (!empty($password)) {
+                        $hash = password_hash($password, PASSWORD_BCRYPT);
+                        $this->db->prepare("UPDATE usuarios SET password = ? WHERE id = ?")->execute([$hash, $userId]);
+                    }
+                } else {
+                    // Create base user (estado_id=1 -> ACTIVO)
+                    $pw = $password ? password_hash($password, PASSWORD_BCRYPT) : password_hash($dni ?: $codigo, PASSWORD_BCRYPT);
+                    $stmtInsertUser = $this->db->prepare("
+                        INSERT INTO usuarios (email, codigo_empleado, password, estado_id) 
+                        VALUES (?, ?, ?, 1)
+                    ");
+                    $stmtInsertUser->execute([$email, $codigo, $pw]);
+                    $userId = (int) $this->db->lastInsertId();
+
+                    // Assign role TRABAJADOR (id=3)
+                    $this->db->prepare("INSERT INTO usuario_roles (usuario_id, rol_id) VALUES (?, 3)")
+                        ->execute([$userId]);
+
+                    // Create worker profile
+                    $stmtInsertPerfil = $this->db->prepare("
+                        INSERT INTO usuarios_trabajador (usuario_id, nombres, apellidos, dni, telefono) 
+                        VALUES (?, ?, ?, ?, ?)
+                    ");
+                    $stmtInsertPerfil->execute([$userId, $nombres, $apellidos, $dni, $telefono ?: null]);
+                }
+
+                // Sede & Horario assignment
+                if (!empty($sedeCodigo)) {
+                    $stmtSede = $this->db->prepare("SELECT id FROM sedes WHERE codigo = ?");
+                    $stmtSede->execute([$sedeCodigo]);
+                    $sede = $stmtSede->fetch();
+
+                    if ($sede) {
+                        $sedeId = $sede['id'];
+                        $horarioId = null;
+
+                        if (!empty($horarioNombre)) {
+                            $stmtHorario = $this->db->prepare("SELECT id FROM horarios_sede WHERE sede_id = ? AND nombre = ?");
+                            $stmtHorario->execute([$sedeId, $horarioNombre]);
+                            $horario = $stmtHorario->fetch();
+                            if ($horario) {
+                                $horarioId = $horario['id'];
+                            }
+                        }
+
+                        if ($horarioId) {
+                            $stmtActive = $this->db->prepare("
+                                SELECT id FROM usuario_sede 
+                                WHERE usuario_id = ? AND sede_id = ? AND horario_id = ? AND estado = 1
+                            ");
+                            $stmtActive->execute([$userId, $sedeId, $horarioId]);
+                            if (!$stmtActive->fetch()) {
+                                $this->db->prepare("
+                                    UPDATE usuario_sede SET estado = 0, fecha_fin = CURDATE() 
+                                    WHERE usuario_id = ? AND estado = 1
+                                ")->execute([$userId]);
+
+                                $stmtAsig = $this->db->prepare("
+                                    INSERT INTO usuario_sede (usuario_id, sede_id, horario_id, fecha_inicio, estado) 
+                                    VALUES (?, ?, ?, CURDATE(), 1)
+                                ");
+                                $stmtAsig->execute([$userId, $sedeId, $horarioId]);
+                            }
+                        }
+                    }
+                }
+
+                $this->db->commit();
+                $exitosos++;
+            } catch (\Exception $e) {
+                $this->db->rollBack();
+                $errores[] = "Fila {$totalProcesados}: " . $e->getMessage();
+            }
+        }
+        fclose($fileHandle);
+
+        Response::success([
+            'total_procesados' => $totalProcesados,
+            'exitosos' => $exitosos,
+            'errores' => $errores
+        ]);
     }
 }

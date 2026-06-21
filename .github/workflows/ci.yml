@@ -1,0 +1,68 @@
+name: CI Pipeline - Sistema de Asistencia
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  backend-tests:
+    name: Backend CI (PHP)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: mbstring, xml, ctype, iconv, pdo, pdo_mysql
+          coverage: none
+
+      - name: Install Composer Dependencies
+        run: |
+          cd Asistencia-Backend-php
+          composer install --no-progress --prefer-dist --optimize-autoloader
+
+      - name: Run PHPCS (Linter)
+        run: |
+          cd Asistencia-Backend-php
+          vendor/bin/phpcs --standard=phpcs.xml
+
+      - name: Run PHPUnit (Tests)
+        run: |
+          cd Asistencia-Backend-php
+          vendor/bin/phpunit
+
+  frontend-build:
+    name: Frontend CI (Vue 3)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: asistencia-frontend/package-lock.json
+
+      - name: Install Node Dependencies
+        run: |
+          cd asistencia-frontend
+          npm ci
+
+      - name: Run Vitest (Unit Tests)
+        run: |
+          cd asistencia-frontend
+          npm run test:unit
+
+      - name: Run Frontend Build
+        run: |
+          cd asistencia-frontend
+          npm run build

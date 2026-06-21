@@ -15,7 +15,7 @@
       <div v-for="horario in horarios" :key="horario.id" class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition-shadow">
         <div class="flex justify-between items-start mb-4">
           <div>
-            <h3 class="font-bold text-lg text-slate-800">{{ horario.nombre_turno }}</h3>
+            <h3 class="font-bold text-lg text-slate-800">{{ horario.nombre }}</h3>
             <p class="text-xs text-slate-400">{{ getSedeName(horario.sede_id) }}</p>
           </div>
           <span class="px-2 py-1 text-xs font-medium rounded-full"
@@ -34,12 +34,11 @@
           </div>
           <div class="flex justify-between text-sm">
             <span class="text-slate-500">Tolerancia entrada:</span>
-            <span class="font-medium text-slate-800">{{ horario.tolerancia_entrada_minutos }} min</span>
+            <span class="font-medium text-slate-800">{{ horario.tolerancia_entrada }} min</span>
           </div>
           <div class="flex justify-between text-sm border-t border-slate-100 pt-2">
             <span class="text-slate-500">Días:</span>
-            <!-- El backend ahora devuelve horario.dias como array ['L','M','X',...] -->
-            <span class="font-medium text-slate-700">{{ formatDias(horario.dias) }}</span>
+            <span class="font-medium text-slate-700">{{ formatDias(horario.dias_semana) }}</span>
           </div>
         </div>
         <div class="flex justify-end space-x-2">
@@ -67,7 +66,7 @@
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1">Nombre del Turno <span class="text-red-500">*</span></label>
-            <input v-model="form.nombre_turno" type="text" required class="input-field" placeholder="Ej: Turno Mañana">
+            <input v-model="form.nombre" type="text" required class="input-field" placeholder="Ej: Turno Mañana">
           </div>
           <div class="grid grid-cols-2 gap-4">
             <div>
@@ -82,11 +81,11 @@
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1">Tolerancia Entrada (min)</label>
-              <input v-model="form.tolerancia_entrada_minutos" type="number" min="0" class="input-field" placeholder="0">
+              <input v-model="form.tolerancia_entrada" type="number" min="0" class="input-field" placeholder="0">
             </div>
             <div>
               <label class="block text-sm font-medium text-slate-700 mb-1">Tolerancia Salida (min)</label>
-              <input v-model="form.tolerancia_salida_minutos" type="number" min="0" class="input-field" placeholder="0">
+              <input v-model="form.tolerancia_salida" type="number" min="0" class="input-field" placeholder="0">
             </div>
           </div>
 
@@ -103,6 +102,14 @@
               </label>
             </div>
             <p v-if="form.dias.length === 0" class="text-xs text-red-500 mt-1">Selecciona al menos un día.</p>
+          </div>
+
+          <div v-if="isEditing">
+            <label class="block text-sm font-medium text-slate-700 mb-1">Estado</label>
+            <select v-model="form.activo" class="input-field">
+              <option :value="1">Activo</option>
+              <option :value="0">Inactivo</option>
+            </select>
           </div>
 
           <div class="flex justify-end space-x-3 pt-4 border-t border-slate-100">
@@ -139,22 +146,25 @@ const diasOpciones = [
   { value: 'D', label: 'Dom' },
 ]
 
+const charToNum = { L: 1, M: 2, X: 3, J: 4, V: 5, S: 6, D: 7 }
+const numToChar = { 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V', 6: 'S', 7: 'D' }
+
 const form = reactive({
   id: null,
   sede_id: '',
-  nombre_turno: '',
+  nombre: '',
   hora_entrada: '',
   hora_salida: '',
-  tolerancia_entrada_minutos: 0,
-  tolerancia_salida_minutos: 0,
-  dias: ['L', 'M', 'X', 'J', 'V']   // campo correcto que usa el backend
+  tolerancia_entrada: 0,
+  tolerancia_salida: 0,
+  activo: 1,
+  dias: ['L', 'M', 'X', 'J', 'V']
 })
 
-// Formatea array de días ['L','M','X'] → 'Lun, Mar, Mié'
-const formatDias = (diasArr) => {
-  if (!diasArr || !diasArr.length) return '—'
-  const map = { L: 'Lun', M: 'Mar', X: 'Mié', J: 'Jue', V: 'Vie', S: 'Sáb', D: 'Dom' }
-  return diasArr.map(d => map[d] || d).join(', ')
+const formatDias = (diasNumArr) => {
+  if (!diasNumArr || !diasNumArr.length) return '—'
+  const map = { 1: 'Lun', 2: 'Mar', 3: 'Mié', 4: 'Jue', 5: 'Vie', 6: 'Sáb', 7: 'Dom' }
+  return diasNumArr.map(d => map[d] || d).join(', ')
 }
 
 const getSedeName = (sedeId) => {
@@ -182,23 +192,31 @@ const fetchInitialData = async () => {
 const openModal = (item = null) => {
   if (item) {
     isEditing.value = true
-    // El backend devuelve horario.dias como array ['L','M',...]
-    const dias = Array.isArray(item.dias) ? [...item.dias] : ['L', 'M', 'X', 'J', 'V']
+    const dias = Array.isArray(item.dias_semana)
+      ? item.dias_semana.map(d => numToChar[d])
+      : ['L', 'M', 'X', 'J', 'V']
     Object.assign(form, {
       id: item.id,
       sede_id: item.sede_id,
-      nombre_turno: item.nombre_turno,
-      hora_entrada: item.hora_entrada,
-      hora_salida: item.hora_salida,
-      tolerancia_entrada_minutos: item.tolerancia_entrada_minutos ?? 0,
-      tolerancia_salida_minutos: item.tolerancia_salida_minutos ?? 0,
+      nombre: item.nombre,
+      hora_entrada: item.hora_entrada.substring(0, 5),
+      hora_salida: item.hora_salida.substring(0, 5),
+      tolerancia_entrada: item.tolerancia_entrada ?? 0,
+      tolerancia_salida: item.tolerancia_salida ?? 0,
+      activo: item.activo,
       dias
     })
   } else {
     isEditing.value = false
     Object.assign(form, {
-      id: null, sede_id: '', nombre_turno: '', hora_entrada: '', hora_salida: '',
-      tolerancia_entrada_minutos: 0, tolerancia_salida_minutos: 0,
+      id: null,
+      sede_id: '',
+      nombre: '',
+      hora_entrada: '',
+      hora_salida: '',
+      tolerancia_entrada: 0,
+      tolerancia_salida: 0,
+      activo: 1,
       dias: ['L', 'M', 'X', 'J', 'V']
     })
   }
@@ -208,24 +226,48 @@ const openModal = (item = null) => {
 const closeModal = () => { isModalOpen.value = false }
 
 const saveItem = async () => {
-  if (form.dias.length === 0) return
+  form.nombre = form.nombre ? form.nombre.trim() : ''
+  if (!form.sede_id) {
+    alert('Debe seleccionar una sede')
+    return
+  }
+  if (!form.nombre) {
+    alert('El nombre del turno es requerido')
+    return
+  }
+  if (!form.hora_entrada) {
+    alert('La hora de entrada es requerida')
+    return
+  }
+  if (!form.hora_salida) {
+    alert('La hora de salida es requerida')
+    return
+  }
+  if (form.tolerancia_entrada < 0 || form.tolerancia_salida < 0) {
+    alert('Las tolerancias no pueden ser valores negativos')
+    return
+  }
+  if (form.dias.length === 0) {
+    alert('Debe seleccionar al menos un día de la semana')
+    return
+  }
+
   saving.value = true
   try {
+    const diasSemanaNums = form.dias.map(d => charToNum[d])
     const payload = {
       sede_id: form.sede_id,
-      nombre_turno: form.nombre_turno,
+      nombre: form.nombre,
       hora_entrada: form.hora_entrada,
       hora_salida: form.hora_salida,
-      tolerancia_entrada_minutos: Number(form.tolerancia_entrada_minutos),
-      tolerancia_salida_minutos: Number(form.tolerancia_salida_minutos),
-      dias: form.dias  // nombre correcto para el backend
+      tolerancia_entrada: Number(form.tolerancia_entrada || 0),
+      tolerancia_salida: Number(form.tolerancia_salida || 0),
+      activo: form.activo,
+      dias_semana: diasSemanaNums
     }
+    
     if (isEditing.value) {
-      // Actualizar datos y sincronizar días en paralelo
-      await Promise.all([
-        api.put(`/v1/web/horarios/${form.id}`, payload),
-        api.put(`/v1/web/horarios/${form.id}/dias`, { dias: form.dias })
-      ])
+      await api.put(`/v1/web/horarios/${form.id}`, payload)
     } else {
       await api.post('/v1/web/horarios', payload)
     }

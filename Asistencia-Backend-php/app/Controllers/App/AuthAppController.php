@@ -6,9 +6,11 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Models\UsuarioApp;
 use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 
 /**
  * AuthAppController - Login y perfil para la app móvil
+ * Esquema v2: usuarios unificados + usuario_roles (TRABAJADOR) + usuarios_trabajador
  */
 class AuthAppController
 {
@@ -26,6 +28,9 @@ class AuthAppController
      */
     public function login(Request $request): void
     {
+        // Control de Rate Limiting
+        \App\Middleware\RateLimitMiddleware::check('login_app');
+
         $codigo   = trim($request->input('codigo_empleado', ''));
         $password = $request->input('password', '');
 
@@ -44,6 +49,14 @@ class AuthAppController
             $this->response->unauthorized('Credenciales incorrectas.');
         }
 
+        // Esquema v2: estado viene de catálogo estados_usuario
+        if ($usuario['estado'] !== 'ACTIVO') {
+            Response::error('Cuenta deshabilitada. Contacte al administrador.', 403);
+        }
+
+        // Limpiar rate limiting ya que las credenciales son correctas
+        \App\Middleware\RateLimitMiddleware::clearAttempts('login_app');
+
         $token = $this->generateToken($usuario, 'app');
 
         $this->response->success([
@@ -60,7 +73,7 @@ class AuthAppController
         // FIX Bug #3: Request::getAttribute() no existe. El payload JWT
         // lo inyecta el Middleware en $_REQUEST['auth_user']['sub'].
         $userId  = (int) ($_REQUEST['auth_user']['sub'] ?? 0);
-        $usuario = $this->model->find($userId);
+        $usuario = $this->model->findConAsignacion($userId);
 
         if (!$usuario) {
             Response::notFound('Usuario no encontrado.');
@@ -71,11 +84,85 @@ class AuthAppController
 
     /**
      * POST /v1/app/logout  [protegida]
-     * En JWT stateless simplemente confirmamos el cierre.
+     * Registrar el token en blacklist al hacer logout.
      */
     public function logout(Request $request): void
     {
+        $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+        $token = '';
+        if (preg_match('/Bearer\s+(.+)/', $header, $m)) {
+            $token = $m[1];
+        }
+
+        if ($token) {
+            try {
+                $jwtService = new \App\Services\JwtService();
+                $decoded = $jwtService->decodeToken($token);
+                $jwtService->blacklistToken($token, (int)$decoded['sub'], (int)$decoded['exp'], 'app');
+            } catch (\Exception $e) {
+                // Ignorar si el token es inválido o ya expiró
+            }
+        }
+
         $this->response->success(null, 'Sesión cerrada.');
+    }
+
+    /**
+     * POST /v1/app/password/reset-request
+     */
+    public function requestPasswordReset(Request $request): void
+    {
+        $dni    = trim($request->input('dni', ''));
+        $codigo = trim($request->input('codigo_empleado', ''));
+
+        if (!$dni || !$codigo) {
+            Response::unprocessable('Datos requeridos', [
+                'dni'             => 'Requerido',
+                'codigo_empleado' => 'Requerido',
+            ]);
+        }
+
+        $usuario = $this->model->findByDniAndCodigo($dni, $codigo);
+
+        if (!$usuario) {
+            // Retornamos genérico por seguridad
+            Response::error('No se encontró un usuario con esos datos.', 404);
+        }
+
+        $this->model->createPasswordResetRequest((int)$usuario['id']);
+
+        Response::success(null, 'Solicitud de recuperación enviada al administrador.');
+    }
+
+    /**
+     * POST /v1/app/password/change [protegida]
+     */
+    public function changePassword(Request $request): void
+    {
+        $userId          = (int) ($_REQUEST['auth_user']['sub'] ?? 0);
+        $currentPassword = $request->input('current_password', '');
+        $newPassword     = $request->input('new_password', '');
+
+        if (!$currentPassword || !$newPassword) {
+            Response::unprocessable('Datos requeridos', [
+                'current_password' => 'Requerido',
+                'new_password'     => 'Requerido',
+            ]);
+        }
+
+        if (strlen($newPassword) < 8 || !preg_match('/[A-Za-z]/', $newPassword) || !preg_match('/[0-9]/', $newPassword)) {
+            Response::unprocessable('La nueva contraseña debe tener al menos 8 caracteres y contener letras y números.');
+        }
+
+        $usuario = $this->model->find($userId);
+        if (!$usuario || !password_verify($currentPassword, $usuario['password'])) {
+            Response::error('La contraseña actual es incorrecta.', 401);
+        }
+
+        $hash = password_hash($newPassword, PASSWORD_DEFAULT);
+        $this->model->updatePassword($userId, $hash);
+
+        Response::success(null, 'Contraseña actualizada correctamente.');
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -84,21 +171,8 @@ class AuthAppController
 
     private function generateToken(array $usuario, string $type): string
     {
-        $secret     = $_ENV['JWT_SECRET'] ?? 'secret';
-        $expiration = (int)($_ENV['JWT_EXPIRATION'] ?? 3600);
-
-        $payload = [
-            'iss'  => 'asistencia-api',
-            'iat'  => time(),
-            'exp'  => time() + $expiration,
-            'sub'  => $usuario['id'],
-            'rol'  => $usuario['rol'],
-            // FIX Bug #1: el claim era 'type' pero AuthAppMiddleware verifica 'tipo'.
-            // Con 'type' el middleware rechazaba TODOS los tokens de la app.
-            'tipo' => $type,
-        ];
-
-        return JWT::encode($payload, $secret, 'HS256');
+        $jwtService = new \App\Services\JwtService();
+        return $jwtService->generateToken((int)$usuario['id'], 'trabajador', $type);
     }
 
     private function sanitize(array $usuario): array

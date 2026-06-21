@@ -5,6 +5,12 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Database;
 
+/**
+ * UsuarioWebController — Gestión de admins y supervisores.
+ * Esquema v2: usuarios + usuario_roles + roles + usuarios_staff + estados_usuario.
+ * Ya no existe tabla usuarios_web ni usuario_web_sede.
+ * Supervisores se asignan a sedes via usuario_sede (mismo que trabajadores).
+ */
 class UsuarioWebController extends BaseWebController
 {
 
@@ -18,18 +24,34 @@ class UsuarioWebController extends BaseWebController
     public function index(Request $req): void
     {
         $this->soloAdministrador();
-        $stmt = $this->db->query("
-            SELECT u.id, u.nombre, u.email, u.rol, u.estado, u.created_at,
-                   (SELECT s.nombre
-                    FROM usuario_web_sede us
-                    JOIN sedes s ON us.sede_id = s.id
-                    WHERE us.usuario_web_id = u.id AND us.activo = 1
-                    ORDER BY us.fecha_inicio DESC
-                    LIMIT 1) AS sede
-            FROM usuarios_web u
-            ORDER BY u.rol, u.nombre
-        ");
-        Response::success($stmt->fetchAll());
+        try {
+            $stmt = $this->db->query("
+                SELECT u.id, u.email, u.estado_id,
+                       eu.nombre AS estado,
+                       us.nombre AS nombre,
+                       r.nombre AS rol,
+                       u.created_at
+                FROM usuarios u
+                INNER JOIN usuario_roles ur  ON ur.usuario_id = u.id
+                INNER JOIN roles r           ON r.id = ur.rol_id
+                INNER JOIN estados_usuario eu ON eu.id = u.estado_id
+                LEFT JOIN usuarios_staff us  ON us.usuario_id = u.id
+                WHERE r.nombre IN ('ADMIN', 'SUPERVISOR')
+                ORDER BY r.nombre, us.nombre
+            ");
+            $users = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+            // Normalizar roles
+            $rolMap = ['ADMIN' => 'administrador', 'SUPERVISOR' => 'supervisor'];
+            foreach ($users as &$u) {
+                $u['rol'] = $rolMap[$u['rol']] ?? strtolower($u['rol']);
+            }
+
+            Response::success($users);
+        } catch (\Exception $e) {
+            error_log('[UsuarioWebController::index] Error SQL: ' . $e->getMessage());
+            Response::error('Error al obtener el listado de usuarios', 500);
+        }
     }
 
     /** GET /v1/web/usuarios-web/{id} */
@@ -37,10 +59,25 @@ class UsuarioWebController extends BaseWebController
     {
         $this->soloAdministrador();
         $id   = (int) $req->param('id');
-        $stmt = $this->db->prepare("SELECT id, nombre, email, rol, estado FROM usuarios_web WHERE id = ?");
+        $stmt = $this->db->prepare("
+            SELECT u.id, u.email, u.estado_id,
+                   eu.nombre AS estado,
+                   us.nombre AS nombre,
+                   r.nombre AS rol
+            FROM usuarios u
+            INNER JOIN usuario_roles ur  ON ur.usuario_id = u.id
+            INNER JOIN roles r           ON r.id = ur.rol_id
+            INNER JOIN estados_usuario eu ON eu.id = u.estado_id
+            LEFT JOIN usuarios_staff us  ON us.usuario_id = u.id
+            WHERE u.id = ? AND r.nombre IN ('ADMIN', 'SUPERVISOR')
+        ");
         $stmt->execute([$id]);
-        $user = $stmt->fetch();
+        $user = $stmt->fetch(\PDO::FETCH_ASSOC);
         if (!$user) Response::notFound('Usuario web no encontrado');
+
+        $rolMap = ['ADMIN' => 'administrador', 'SUPERVISOR' => 'supervisor'];
+        $user['rol'] = $rolMap[$user['rol']] ?? strtolower($user['rol']);
+
         Response::success($user);
     }
 
@@ -61,49 +98,60 @@ class UsuarioWebController extends BaseWebController
         if (!in_array($rol, ['administrador', 'supervisor'])) $errors[] = 'rol inválido';
         if ($errors) Response::unprocessable('Datos incompletos', $errors);
 
-        $stmt = $this->db->prepare("SELECT id FROM usuarios_web WHERE email = ?");
+        // Validar complejidad de contraseña (mínimo 8 caracteres, letras y números)
+        if (!\App\Core\Validator::isSecurePassword($password)) {
+            Response::error('La contraseña debe tener al menos 8 caracteres y contener letras y números', 422);
+        }
+
+        // Verificar email único
+        $stmt = $this->db->prepare("SELECT id FROM usuarios WHERE email = ?");
         $stmt->execute([$email]);
         if ($stmt->fetch()) Response::error('El email ya está registrado', 422);
 
-        $estado = strtoupper(trim((string) $req->input('estado')));
-        if (!$estado) {
-            // El administrador inicia ACTIVO; supervisores inician INACTIVO (el admin los activa)
-            $estado = $rol === 'administrador' ? 'ACTIVO' : 'INACTIVO';
+        // Mapear rol a ID del catálogo
+        $rolMap = ['administrador' => 1, 'supervisor' => 2]; // ADMIN=1, SUPERVISOR=2
+        $rolId = $rolMap[$rol];
+
+        // Mapear estado
+        $estadoInput = strtoupper(trim((string) $req->input('estado')));
+        if (!$estadoInput) {
+            $estadoInput = $rol === 'administrador' ? 'ACTIVO' : 'INACTIVO';
         }
-        if (!in_array($estado, ['ACTIVO', 'INACTIVO'])) {
+        $estadoMap = ['ACTIVO' => 1, 'INACTIVO' => 2, 'BLOQUEADO' => 3];
+        $estadoId = $estadoMap[$estadoInput] ?? null;
+        if (!$estadoId) {
             Response::unprocessable('Estado inválido');
         }
 
-        $sedeId = $req->input('sede_id');
-        if ($rol === 'supervisor') {
-            if (!$sedeId || !is_numeric($sedeId)) {
-                Response::unprocessable('sede_id es requerido para supervisor');
-            }
-            $stmtSede = $this->db->prepare('SELECT id FROM sedes WHERE id = ? AND deleted_at IS NULL');
-            $stmtSede->execute([(int)$sedeId]);
-            if (!$stmtSede->fetch()) {
-                Response::unprocessable('Sede no válida');
-            }
+        $this->db->beginTransaction();
+        try {
+            // Crear usuario base
+            $stmt = $this->db->prepare("
+                INSERT INTO usuarios (email, password, estado_id)
+                VALUES (:e, :p, :estado)
+            ");
+            $stmt->execute([
+                ':e'      => $email,
+                ':p'      => password_hash($password, PASSWORD_BCRYPT),
+                ':estado' => $estadoId,
+            ]);
+            $nuevoId = (int) $this->db->lastInsertId();
+
+            // Asignar rol
+            $this->db->prepare("INSERT INTO usuario_roles (usuario_id, rol_id) VALUES (?, ?)")
+                ->execute([$nuevoId, $rolId]);
+
+            // Crear perfil staff
+            $this->db->prepare("INSERT INTO usuarios_staff (usuario_id, nombre) VALUES (?, ?)")
+                ->execute([$nuevoId, $nombre]);
+
+            $this->db->commit();
+            Response::success(['id' => $nuevoId], 'Usuario web creado correctamente', 201);
+        } catch (\Exception $e) {
+            $this->db->rollBack();
+            error_log('[UsuarioWebController::store] Error: ' . $e->getMessage());
+            Response::error('Error al crear el usuario web. Intente nuevamente.', 500);
         }
-
-        $stmt = $this->db->prepare("
-            INSERT INTO usuarios_web (nombre, email, password, rol, estado)
-            VALUES (:n, :e, :p, :r, :estado)
-        ");
-        $stmt->execute([
-            ':n'      => $nombre,
-            ':e'      => $email,
-            ':p'      => password_hash($password, PASSWORD_BCRYPT),
-            ':r'      => $rol,
-            ':estado' => $estado,
-        ]);
-
-        $nuevoId = (int) $this->db->lastInsertId();
-        if ($rol === 'supervisor') {
-            $this->db->prepare("INSERT INTO usuario_web_sede (usuario_web_id, sede_id, activo, fecha_inicio) VALUES (?, ?, 1, CURDATE())")->execute([$nuevoId, (int)$sedeId]);
-        }
-
-        Response::success(['id' => $nuevoId], 'Usuario web creado correctamente', 201);
     }
 
     /** PUT /v1/web/usuarios-web/{id} — actualizar nombre, email o rol */
@@ -112,58 +160,58 @@ class UsuarioWebController extends BaseWebController
         $this->soloAdministrador();
         $id = (int) $req->param('id');
 
-        $campos = [];
-        $params = [];
-        foreach (['nombre', 'email', 'rol', 'estado', 'password'] as $campo) {
-            if ($req->input($campo) !== null) {
-                if ($campo === 'estado') {
-                    $estado = strtoupper(trim((string) $req->input('estado')));
-                    if (!in_array($estado, ['ACTIVO', 'INACTIVO'])) {
-                        Response::unprocessable('Estado inválido');
-                    }
-                    $campos[] = "`estado` = ?";
-                    $params[] = $estado;
-                } elseif ($campo === 'password') {
-                    if ($req->input('password') !== '') {
-                        $campos[] = "`password` = ?";
-                        $params[] = password_hash($req->input('password'), PASSWORD_BCRYPT);
-                    }
-                } else {
-                    $campos[] = "`{$campo}` = ?";
-                    $params[] = $req->input($campo);
-                }
+        $this->db->beginTransaction();
+        try {
+            // Actualizar campos de usuarios
+            $camposUser = [];
+            $paramsUser = [];
+            if ($req->input('email') !== null) {
+                $camposUser[] = "`email` = ?";
+                $paramsUser[] = strtolower(trim($req->input('email')));
             }
-        }
-        if (empty($campos)) Response::unprocessable('No hay campos a actualizar');
-
-        $params[] = $id;
-        $this->db->prepare("UPDATE usuarios_web SET " . implode(', ', $campos) . " WHERE id = ?")->execute($params);
-
-        $sedeId = $req->input('sede_id');
-        if ($sedeId !== null) {
-            if (!is_numeric($sedeId)) {
-                Response::unprocessable('sede_id inválido');
+            if ($req->input('password') !== null && trim($req->input('password')) !== '') {
+                $camposUser[] = "`password` = ?";
+                $paramsUser[] = password_hash($req->input('password'), PASSWORD_BCRYPT);
+            }
+            if ($req->input('estado') !== null) {
+                $estadoMap = ['ACTIVO' => 1, 'INACTIVO' => 2, 'BLOQUEADO' => 3];
+                $estadoId = $estadoMap[strtoupper(trim($req->input('estado')))] ?? null;
+                if (!$estadoId) Response::unprocessable('Estado inválido');
+                $camposUser[] = "`estado_id` = ?";
+                $paramsUser[] = $estadoId;
+            }
+            if ($camposUser) {
+                $paramsUser[] = $id;
+                $this->db->prepare("UPDATE usuarios SET " . implode(', ', $camposUser) . " WHERE id = ?")
+                    ->execute($paramsUser);
             }
 
-            $stmtRole = $this->db->prepare('SELECT rol FROM usuarios_web WHERE id = ?');
-            $stmtRole->execute([$id]);
-            $currentRole = $stmtRole->fetchColumn();
+            // Actualizar nombre staff
+            if ($req->input('nombre') !== null) {
+                $this->db->prepare("
+                    INSERT INTO usuarios_staff (usuario_id, nombre) VALUES (?, ?)
+                    ON DUPLICATE KEY UPDATE nombre = VALUES(nombre)
+                ")->execute([$id, $req->input('nombre')]);
+            }
+
+            // Actualizar rol
             if ($req->input('rol') !== null) {
-                $currentRole = $req->input('rol');
+                $rolMap = ['administrador' => 1, 'supervisor' => 2];
+                $nuevoRolId = $rolMap[$req->input('rol')] ?? null;
+                if (!$nuevoRolId) Response::unprocessable('Rol inválido');
+                $this->db->prepare("DELETE FROM usuario_roles WHERE usuario_id = ? AND rol_id IN (1,2)")
+                    ->execute([$id]);
+                $this->db->prepare("INSERT INTO usuario_roles (usuario_id, rol_id) VALUES (?, ?)")
+                    ->execute([$id, $nuevoRolId]);
             }
-            if ($currentRole !== 'supervisor') {
-                Response::unprocessable('Solo supervisor puede tener sede asignada');
-            }
-            $stmtSede = $this->db->prepare('SELECT id FROM sedes WHERE id = ? AND deleted_at IS NULL');
-            $stmtSede->execute([(int)$sedeId]);
-            if (!$stmtSede->fetch()) {
-                Response::unprocessable('Sede no válida');
-            }
-            $this->db->prepare('UPDATE usuario_web_sede SET activo = 0 WHERE usuario_web_id = ?')->execute([$id]);
-            $this->db->prepare('INSERT INTO usuario_web_sede (usuario_web_id, sede_id, activo, fecha_inicio) VALUES (?, ?, 1, CURDATE())')->execute([$id, (int)$sedeId]);
-        }
 
-        Response::success(null, 'Usuario web actualizado correctamente');
+            $this->db->commit();
+            Response::success(null, 'Usuario web actualizado correctamente');
+        } catch (\Exception $e) {
+            $this->db->rollBack();
+            error_log('[UsuarioWebController::update] Error: ' . $e->getMessage());
+            Response::error('Error al actualizar el usuario web. Intente nuevamente.', 500);
+        }
     }
 
     /** PATCH /v1/web/usuarios-web/{id}/estado — activar/desactivar */
@@ -173,10 +221,12 @@ class UsuarioWebController extends BaseWebController
         $id     = (int) $req->param('id');
         $estado = strtoupper(trim((string) $req->input('estado')));
 
-        if (!in_array($estado, ['ACTIVO', 'INACTIVO']))
+        $estadoMap = ['ACTIVO' => 1, 'INACTIVO' => 2, 'BLOQUEADO' => 3];
+        $estadoId = $estadoMap[$estado] ?? null;
+        if (!$estadoId)
             Response::unprocessable('Estado inválido');
 
-        $this->db->prepare("UPDATE usuarios_web SET estado = ? WHERE id = ?")->execute([$estado, $id]);
+        $this->db->prepare("UPDATE usuarios SET estado_id = ? WHERE id = ?")->execute([$estadoId, $id]);
         Response::success(null, "Estado cambiado a {$estado}");
     }
 }

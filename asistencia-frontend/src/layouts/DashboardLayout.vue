@@ -1,12 +1,12 @@
 <template>
-  <div class="min-h-screen bg-slate-50 flex">
+  <div class="h-screen bg-slate-50 flex overflow-hidden">
     <!-- Sidebar Overlay (móvil) -->
     <div v-if="sidebarOpen" @click="sidebarOpen = false"
       class="fixed inset-0 bg-slate-900/40 z-20 md:hidden"></div>
 
     <!-- Sidebar -->
     <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
-      class="fixed md:static w-64 bg-slate-900 text-white flex flex-col z-30 h-full min-h-screen transition-transform duration-300 md:translate-x-0">
+      class="fixed md:static w-64 bg-slate-900 text-white flex flex-col z-30 h-full transition-transform duration-300 md:translate-x-0 flex-shrink-0">
       <div class="h-16 flex items-center justify-center border-b border-slate-800">
         <h1 class="text-xl font-bold tracking-wider text-primary-400">PANEL WEB</h1>
       </div>
@@ -29,6 +29,10 @@
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
           <span>Supervisores</span>
         </router-link>
+        <router-link to="/departamentos" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+          <span>Departamentos</span>
+        </router-link>
         <router-link to="/usuarios-app" v-if="isAdmin || isSupervisor" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
           <span>Trabajadores (App)</span>
@@ -45,10 +49,7 @@
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
           <span>Feriados</span>
         </router-link>
-        <router-link to="/departamentos" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
-          <span>Departamentos</span>
-        </router-link>
+
         
         <div class="pt-4 pb-2">
           <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Operaciones</p>
@@ -63,9 +64,14 @@
           <span>Justificaciones</span>
         </router-link>
         <router-link to="/solicitudes-ausencia" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
           <span>Solicitudes Ausencia</span>
         </router-link>
+        <router-link to="/reportes" class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300" active-class="bg-primary-600 text-white">
+           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+          <span>Centro de Reportes</span>
+        </router-link>
+
       </nav>
       
       <!-- Badge de rol del usuario -->
@@ -95,8 +101,8 @@
     </aside>
 
     <!-- Main Content -->
-    <div class="flex-1 flex flex-col min-w-0">
-      <header class="h-16 bg-white shadow-sm flex items-center justify-between px-6 z-10">
+    <div class="flex-1 flex flex-col min-w-0 h-full">
+      <header class="h-16 bg-white shadow-sm flex items-center justify-between px-6 z-10 flex-shrink-0">
         <button @click="sidebarOpen = !sidebarOpen" class="md:hidden text-slate-500 hover:text-slate-700">
            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
         </button>
@@ -106,10 +112,10 @@
              {{ userInitial }}
            </div>
            <span class="text-sm font-medium text-slate-700 hidden sm:block">{{ userName }}</span>
-        </div>
+         </div>
       </header>
       
-      <main class="flex-1 overflow-auto p-6">
+      <main class="flex-1 overflow-y-auto p-6">
         <router-view></router-view>
       </main>
     </div>
@@ -127,8 +133,8 @@ const sidebarOpen = ref(false)
 
 const userName = computed(() => authStore.user?.nombres || 'Usuario')
 const userInitial = computed(() => userName.value.charAt(0).toUpperCase())
-const isAdmin = computed(() => authStore.user?.rol === 'administrador')
-const isSupervisor = computed(() => authStore.user?.rol === 'supervisor')
+const isAdmin = computed(() => authStore.isAdmin)
+const isSupervisor = computed(() => authStore.isSupervisor)
 
 const handleLogout = async () => {
   await authStore.logout()

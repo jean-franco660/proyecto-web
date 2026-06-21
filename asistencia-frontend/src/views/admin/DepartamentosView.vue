@@ -127,6 +127,14 @@ const openModal = (item = null) => {
 const closeModal = () => { isModalOpen.value = false }
 
 const saveItem = async () => {
+  form.nombre = form.nombre ? form.nombre.trim() : ''
+  form.descripcion = form.descripcion ? form.descripcion.trim() : ''
+
+  if (!form.nombre) {
+    alert('El nombre del departamento es requerido')
+    return
+  }
+
   saving.value = true
   try {
     if (isEditing.value) {

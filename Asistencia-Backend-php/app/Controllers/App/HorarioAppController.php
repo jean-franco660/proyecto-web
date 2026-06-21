@@ -8,18 +8,19 @@ use App\Models\HorarioSede;
 use App\Models\UsuarioApp;
 
 /**
- * HorarioAppController - Consulta de horarios de la sede desde la app
+ * HorarioAppController - Consulta de horarios de la sede desde la app.
+ * Esquema v2: usuarios unificados + usuario_sede + horarios_sede.
  */
 class HorarioAppController extends BaseAppController
 {
     private HorarioSede $model;
-    private UsuarioApp $usuarioModel; // ✅ instanciado una sola vez
+    private UsuarioApp $usuarioModel;
 
     public function __construct()
     {
         parent::__construct();
         $this->model        = new HorarioSede();
-        $this->usuarioModel = new UsuarioApp(); // ✅ no más "new" dentro de métodos
+        $this->usuarioModel = new UsuarioApp();
     }
 
     /**
@@ -27,7 +28,7 @@ class HorarioAppController extends BaseAppController
      */
     public function obtenerHorarios(Request $request): void
     {
-        $data = $this->obtenerHorariosPorUsuario(); // ✅ usa el método privado
+        $data = $this->obtenerHorariosPorUsuario();
         Response::success($data, 'Horarios obtenidos.');
     }
 

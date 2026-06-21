@@ -5,10 +5,32 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Database;
 
+/**
+ * StatsController — Estadísticas del dashboard.
+ * Esquema v2:
+ *   - asistencias.estado_id FK → estados_asistencia (antes: estado_diario ENUM)
+ *   - asistencias.usuario_sede_id FK → usuario_sede (antes: sede_id directo)
+ *   - justificaciones.estado_id FK → estados_justificacion (antes: estado ENUM)
+ *   - usuario_sede (antes: usuario_app_sede / usuario_web_sede)
+ */
 class StatsController extends BaseWebController
 {
     /**
-     * GET /v1/web/stats/dashboard
+     * Helper: IDs de sedes del supervisor.
+     */
+    private function sedesDelSupervisor(): array
+    {
+        $stmt = $this->db->prepare("
+            SELECT sede_id FROM usuario_sede
+            WHERE usuario_id = :uid AND estado = 1
+              AND (fecha_fin IS NULL OR fecha_fin >= CURDATE())
+        ");
+        $stmt->execute([':uid' => $this->userId()]);
+        return array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'sede_id');
+    }
+
+    /**
+     * GET /v1/web/stats
      * Resumen del día de hoy para el panel principal.
      * Filtros: ?sede_id=1&fecha=2025-03-04
      */
@@ -17,20 +39,30 @@ class StatsController extends BaseWebController
         $sedeId = $req->query('sede_id');
         $fecha  = $req->query('fecha', date('Y-m-d'));
 
-        $whereSedeAdmin = '1=1';
-        $params         = [':fecha' => $fecha];
+        $whereSede = '1=1';
+        $params    = [':fecha' => $fecha];
 
         // Supervisor: solo sus sedes
         if ($this->rol() === 'supervisor') {
-            $whereSedeAdmin = "a.sede_id IN (
-                SELECT sede_id FROM usuario_web_sede
-                WHERE usuario_web_id = :uid AND activo = 1
-            )";
-            $params[':uid'] = $this->userId();
+            $misSedes = $this->sedesDelSupervisor();
+            if (empty($misSedes)) {
+                Response::success([
+                    'fecha'                     => $fecha,
+                    'presentes'                 => 0,
+                    'tardanzas'                 => 0,
+                    'faltas'                    => 0,
+                    'justificados'              => 0,
+                    'total_registrados'         => 0,
+                    'justificaciones_pendientes' => 0,
+                ]);
+                return;
+            }
+            $in = implode(',', array_map('intval', $misSedes));
+            $whereSede = "us.sede_id IN ({$in})";
         }
 
         if ($sedeId) {
-            $whereSedeAdmin .= ' AND a.sede_id = :sid';
+            $whereSede .= ' AND us.sede_id = :sid';
             $params[':sid'] = (int) $sedeId;
         }
 
@@ -38,46 +70,38 @@ class StatsController extends BaseWebController
         $stmt = $this->db->prepare("
             SELECT
                 COUNT(*) AS total,
-                SUM(estado_diario = 'PRESENTE')   AS presentes,
-                SUM(estado_diario = 'TARDANZA')   AS tardanzas,
-                SUM(estado_diario = 'FALTA')      AS faltas,
-                SUM(estado_diario = 'JUSTIFICADO') AS justificados
+                SUM(ea.nombre = 'PRESENTE')    AS presentes,
+                SUM(ea.nombre = 'TARDANZA')    AS tardanzas,
+                SUM(ea.nombre = 'FALTA')       AS faltas,
+                SUM(ea.nombre = 'JUSTIFICADO') AS justificados
             FROM asistencias a
-            WHERE {$whereSedeAdmin} AND a.fecha = :fecha
+            INNER JOIN estados_asistencia ea ON ea.id = a.estado_id
+            INNER JOIN usuario_sede us ON us.id = a.usuario_sede_id
+            WHERE {$whereSede} AND a.fecha = :fecha
         ");
         $stmt->execute($params);
         $totales = $stmt->fetch();
 
-        // Marcaciones observadas pendientes
-        $stmt2 = $this->db->prepare("
-            SELECT COUNT(*) AS observadas_pendientes
-            FROM asistencias_diarias ad
-            INNER JOIN asistencias a ON a.id = ad.asistencia_id
-            WHERE {$whereSedeAdmin}
-              AND ad.estado_marcacion = 'OBSERVADA'
-              AND ad.estado_revision  = 'PENDIENTE'
-              AND a.fecha = :fecha
-        ");
-        $stmt2->execute($params);
-        $observadas = $stmt2->fetch();
-
-        // Justificaciones pendientes (sin filtro por sede_id — no existe en esa tabla)
-        $whereJust = 'j.estado = \'PENDIENTE\'';
+        // Justificaciones pendientes (estado_id=1 → PENDIENTE)
+        $whereJust = 'j.estado_id = 1';
         $params3 = [];
 
         if ($this->rol() === 'supervisor') {
-            $whereJust .= " AND j.usuario_app_id IN (
-                SELECT uas.usuario_app_id FROM usuario_app_sede uas
-                INNER JOIN usuario_web_sede uws ON uws.sede_id = uas.sede_id
-                WHERE uws.usuario_web_id = :uid3 AND uws.activo = 1
+            $misSedes = $this->sedesDelSupervisor();
+            $in = implode(',', array_map('intval', $misSedes));
+            $whereJust .= " AND j.usuario_id IN (
+                SELECT us2.usuario_id FROM usuario_sede us2
+                WHERE us2.sede_id IN ({$in})
+                  AND us2.estado = 1
+                  AND (us2.fecha_fin IS NULL OR us2.fecha_fin >= CURDATE())
             )";
-            $params3[':uid3'] = $this->userId();
         }
 
         if ($sedeId) {
-            $whereJust .= " AND j.usuario_app_id IN (
-                SELECT usuario_app_id FROM usuario_app_sede
-                WHERE sede_id = :sid3 AND estado = 'ACTIVO'
+            $whereJust .= " AND j.usuario_id IN (
+                SELECT us3.usuario_id FROM usuario_sede us3
+                WHERE us3.sede_id = :sid3 AND us3.estado = 1
+                  AND (us3.fecha_fin IS NULL OR us3.fecha_fin >= CURDATE())
             )";
             $params3[':sid3'] = (int) $sedeId;
         }
@@ -91,14 +115,13 @@ class StatsController extends BaseWebController
         $justPendientes = $stmt3->fetch();
 
         Response::success([
-            'fecha'                    => $fecha,
-            'presentes'                => (int) $totales['presentes'],
-            'tardanzas'                => (int) $totales['tardanzas'],
-            'faltas'                   => (int) $totales['faltas'],
-            'justificados'             => (int) $totales['justificados'],
-            'total_registrados'        => (int) $totales['total'],
-            'observadas_pendientes'    => (int) $observadas['observadas_pendientes'],
-            'justificaciones_pendientes' => (int) $justPendientes['justificaciones_pendientes'],
+            'fecha'                      => $fecha,
+            'presentes'                  => (int) ($totales['presentes'] ?? 0),
+            'tardanzas'                  => (int) ($totales['tardanzas'] ?? 0),
+            'faltas'                     => (int) ($totales['faltas'] ?? 0),
+            'justificados'               => (int) ($totales['justificados'] ?? 0),
+            'total_registrados'          => (int) ($totales['total'] ?? 0),
+            'justificaciones_pendientes' => (int) ($justPendientes['justificaciones_pendientes'] ?? 0),
         ]);
     }
 }

@@ -19,6 +19,13 @@ setAuthStore(useAuthStore())
 setToastStore(useToastStore())
 setRouter(router)
 
+// Manejo global de errores de Vue
+app.config.errorHandler = (err, instance, info) => {
+  console.error('Unhandled Vue Error:', err, info)
+  const toastStore = useToastStore()
+  toastStore.addToast('Ha ocurrido un error inesperado en la aplicación.', 'error')
+}
+
 app.use(router)
 app.mount('#app')
 

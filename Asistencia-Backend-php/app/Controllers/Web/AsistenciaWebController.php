@@ -6,22 +6,52 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Database;
 
+/**
+ * AsistenciaWebController — Gestión de asistencias/marcaciones desde el panel.
+ * Esquema v2:
+ *   - asistencias.usuario_sede_id (antes: usuario_app_id + sede_id + horario_sede_id)
+ *   - asistencias.estado_id FK → estados_asistencia (antes: estado_diario ENUM string)
+ *   - marcaciones (antes: asistencias_diarias) con activo BOOLEAN
+ *   - usuario_sede (antes: usuario_app_sede)
+ *   - usuarios + usuarios_trabajador (antes: usuarios_app)
+ */
 class AsistenciaWebController extends BaseWebController
 {
+    /**
+     * Helper: obtiene las sedes del supervisor actual.
+     */
+    private function sedesDelSupervisor(): array
+    {
+        $stmt = $this->db->prepare("
+            SELECT sede_id FROM usuario_sede
+            WHERE usuario_id = :uid AND estado = 1
+              AND (fecha_fin IS NULL OR fecha_fin >= CURDATE())
+        ");
+        $stmt->execute([':uid' => $this->userId()]);
+        return array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'sede_id');
+    }
 
+    /** GET /v1/web/asistencias/{id} — detalle de una marcación */
     public function show(Request $req): void
     {
         $id = (int) $req->param('id');
 
         $sql = "
-            SELECT ad.*, a.fecha, a.estado_diario, a.usuario_app_id,
-                u.nombres, u.apellido_paterno, u.codigo_empleado,
-                s.nombre AS sede_nombre
-            FROM asistencias_diarias ad
-            INNER JOIN asistencias a ON a.id = ad.asistencia_id
-            INNER JOIN usuarios_app u ON u.id = a.usuario_app_id
-            INNER JOIN sedes s ON s.id = a.sede_id
-            WHERE ad.id = ?
+            SELECT m.*, a.fecha, ea.nombre AS estado_asistencia,
+                us.usuario_id, us.sede_id,
+                ut.nombres, ut.apellidos,
+                u.codigo_empleado,
+                s.nombre AS sede_nombre,
+                tm.nombre AS tipo_nombre
+            FROM marcaciones m
+            INNER JOIN asistencias a     ON a.id = m.asistencia_id
+            INNER JOIN estados_asistencia ea ON ea.id = a.estado_id
+            INNER JOIN usuario_sede us   ON us.id = a.usuario_sede_id
+            INNER JOIN usuarios u        ON u.id = us.usuario_id
+            LEFT JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
+            INNER JOIN sedes s           ON s.id = us.sede_id
+            INNER JOIN tipos_marcacion tm ON tm.id = m.tipo_id
+            WHERE m.id = ? AND m.activo = 1
         ";
 
         $stmt = $this->db->prepare($sql);
@@ -34,171 +64,223 @@ class AsistenciaWebController extends BaseWebController
 
         // Supervisor: solo puede ver sus sedes
         if ($this->rol() === 'supervisor') {
-            $stmtChk = $this->db->prepare("
-                SELECT id FROM usuario_web_sede
-                WHERE usuario_web_id = ? AND sede_id = ? AND activo = 1
-            ");
-            $stmtChk->execute([$this->userId(), $marcacion['sede_id']]);
-            if (!$stmtChk->fetch()) {
+            $misSedes = $this->sedesDelSupervisor();
+            if (!in_array($marcacion['sede_id'], $misSedes)) {
                 Response::error('Sin acceso a esta marcación', 403);
             }
         }
 
-        unset($marcacion['latitud'], $marcacion['longitud']); // Datos sensibles (opcional)
         Response::success($marcacion);
     }
+
+    /** GET /v1/web/asistencias — listar marcaciones */
     public function index(Request $req): void
     {
-        $sql = "
-            SELECT ad.id, ad.tipo, ad.marcada_en, ad.distancia_metros,
-                   ad.estado_marcacion, ad.motivo_observacion, ad.estado_revision,
-                   a.fecha, a.estado_diario,
-                   u.nombres, u.apellido_paterno, u.codigo_empleado,
-                   s.nombre AS sede_nombre
-            FROM asistencias_diarias ad
-            INNER JOIN asistencias a  ON a.id = ad.asistencia_id
-            INNER JOIN usuarios_app u ON u.id = a.usuario_app_id
-            INNER JOIN sedes s        ON s.id = a.sede_id
-            WHERE 1=1
-        ";
+        $page    = (int) $req->query('page', 1);
+        $perPage = (int) $req->query('per_page', 25);
+        $offset  = ($page - 1) * $perPage;
+
+        $where = "m.activo = 1";
         $params = [];
 
-        // Supervisor solo ve su sede
+        // Supervisor solo ve sus sedes
         if ($this->rol() === 'supervisor') {
-            $sql .= " AND a.sede_id IN (
-                SELECT sede_id FROM usuario_web_sede
-                WHERE usuario_web_id = :uid AND activo = 1
-            )";
-            $params[':uid'] = $this->userId();
+            $misSedes = $this->sedesDelSupervisor();
+            if (empty($misSedes)) {
+                Response::success([
+                    'current_page' => $page,
+                    'data'         => [],
+                    'total'        => 0,
+                    'last_page'    => 1,
+                    'per_page'     => $perPage
+                ]);
+                return;
+            }
+            $in = implode(',', array_map('intval', $misSedes));
+            $where .= " AND us.sede_id IN ({$in})";
         }
 
         if ($req->query('sede_id')) {
-            $sql .= " AND a.sede_id = :sid";
+            $where .= " AND us.sede_id = :sid";
             $params[':sid'] = (int) $req->query('sede_id');
         }
         if ($req->query('fecha_inicio')) {
-            $sql .= " AND DATE(ad.marcada_en) >= :fi";
+            $where .= " AND DATE(m.fecha_hora) >= :fi";
             $params[':fi'] = $req->query('fecha_inicio');
         }
         if ($req->query('fecha_fin')) {
-            $sql .= " AND DATE(ad.marcada_en) <= :ff";
+            $where .= " AND DATE(m.fecha_hora) <= :ff";
             $params[':ff'] = $req->query('fecha_fin');
         }
-        if ($req->query('estado_marcacion')) {
-            $sql .= " AND ad.estado_marcacion = :em";
-            $params[':em'] = $req->query('estado_marcacion');
-        }
-        if ($req->query('estado_revision')) {
-            $sql .= " AND ad.estado_revision = :er";
-            $params[':er'] = $req->query('estado_revision');
+        if ($req->query('estado')) {
+            $where .= " AND ea.nombre = :estado";
+            $params[':estado'] = $req->query('estado');
         }
 
-        $sql .= " ORDER BY ad.marcada_en DESC LIMIT 200";
+        // Count totals
+        $stmtCount = $this->db->prepare("
+            SELECT COUNT(*)
+            FROM marcaciones m
+            INNER JOIN asistencias a ON a.id = m.asistencia_id
+            INNER JOIN estados_asistencia ea ON ea.id = a.estado_id
+            INNER JOIN usuario_sede us ON us.id = a.usuario_sede_id
+            WHERE {$where}
+        ");
+        foreach ($params as $k => $v) $stmtCount->bindValue($k, $v);
+        $stmtCount->execute();
+        $total = (int) $stmtCount->fetchColumn();
+
+        // Select records
+        $sql = "
+            SELECT m.id, tm.nombre AS tipo, m.fecha_hora,
+                   m.distancia, m.observacion, m.activo,
+                   a.fecha, ea.nombre AS estado_asistencia,
+                   ut.nombres, ut.apellidos,
+                   u.codigo_empleado,
+                   s.nombre AS sede_nombre,
+                   us.sede_id
+            FROM marcaciones m
+            INNER JOIN tipos_marcacion tm ON tm.id = m.tipo_id
+            INNER JOIN asistencias a  ON a.id = m.asistencia_id
+            INNER JOIN estados_asistencia ea ON ea.id = a.estado_id
+            INNER JOIN usuario_sede us ON us.id = a.usuario_sede_id
+            INNER JOIN usuarios u     ON u.id = us.usuario_id
+            LEFT JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
+            INNER JOIN sedes s        ON s.id = us.sede_id
+            WHERE {$where}
+            ORDER BY m.fecha_hora DESC
+            LIMIT :limit OFFSET :offset
+        ";
+
         $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
-        Response::success($stmt->fetchAll());
-    }
+        $stmt->bindValue(':limit', $perPage, \PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, \PDO::PARAM_INT);
+        foreach ($params as $k => $v) $stmt->bindValue($k, $v);
+        $stmt->execute();
+        $records = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
+        Response::success([
+            'current_page' => $page,
+            'data'         => $records,
+            'total'        => $total,
+            'last_page'    => ceil($total / $perPage),
+            'per_page'     => $perPage
+        ]);
+    }
 
     /**
      * PUT /v1/web/asistencias/{id}/review
-     * El admin/supervisor revisa una marcación OBSERVADA.
-     * Body: { "estado_revision": "APROBADA" | "MANTENER_OBSERVADA", "observacion": "..." }
+     * El admin/supervisor cambia el estado de una asistencia y registra en el log de auditoría.
+     * Body: { "estado": "PRESENTE" | "TARDANZA" | "FALTA" | "JUSTIFICADO", "observacion": "..." }
      */
     public function updateReview(Request $req): void
     {
-        $id             = (int) $req->param('id');
-        $estadoRevision = (string) $req->input('estado_revision');
-        $observacion    = (string) $req->input('observacion', '');
+        $id          = (int) $req->param('id');
+        $nuevoEstado = strtoupper(trim((string) $req->input('estado')));
+        $observacion = (string) $req->input('observacion', '');
 
-        $validos = ['APROBADA', 'MANTENER_OBSERVADA'];
-        if (!in_array($estadoRevision, $validos)) {
-            Response::unprocessable('estado_revision inválido. Use: ' . implode(' | ', $validos));
+        // Obtener el ID del nuevo estado desde el catálogo
+        $stmtEst = $this->db->prepare("SELECT id FROM estados_asistencia WHERE nombre = ?");
+        $stmtEst->execute([$nuevoEstado]);
+        $nuevoEstadoId = $stmtEst->fetchColumn();
+        if (!$nuevoEstadoId) {
+            Response::unprocessable('Estado inválido. Use: PENDIENTE, PRESENTE, TARDANZA, FALTA, JUSTIFICADO');
         }
 
-        // Verificar que existe y que el rol tiene acceso
+        // Obtener la asistencia actual
         $stmt = $this->db->prepare("
-            SELECT ad.id, a.sede_id
-            FROM asistencias_diarias ad
-            INNER JOIN asistencias a ON a.id = ad.asistencia_id
-            WHERE ad.id = ?
+            SELECT a.id, a.estado_id, us.sede_id
+            FROM asistencias a
+            INNER JOIN usuario_sede us ON us.id = a.usuario_sede_id
+            WHERE a.id = ?
         ");
         $stmt->execute([$id]);
-        $marcacion = $stmt->fetch();
-        if (!$marcacion) {
-            Response::notFound('Marcación no encontrada');
+        $asistencia = $stmt->fetch();
+        if (!$asistencia) {
+            Response::notFound('Asistencia no encontrada');
         }
 
         // Supervisor: solo puede revisar su sede
         if ($this->rol() === 'supervisor') {
-            $stmtChk = $this->db->prepare("
-                SELECT id FROM usuario_web_sede
-                WHERE usuario_web_id = ? AND sede_id = ? AND activo = 1
-            ");
-            $stmtChk->execute([$this->userId(), $marcacion['sede_id']]);
-            if (!$stmtChk->fetch()) {
-                Response::error('Sin acceso a esta marcación', 403);
+            $misSedes = $this->sedesDelSupervisor();
+            if (!in_array($asistencia['sede_id'], $misSedes)) {
+                Response::error('Sin acceso a esta asistencia', 403);
             }
         }
 
-        $this->db->prepare("
-            UPDATE asistencias_diarias
-            SET estado_revision = ?, motivo_observacion = ?, revisado_por = ?, revisado_en = NOW()
-            WHERE id = ?
-        ")->execute([$estadoRevision, $observacion ?: null, $this->userId(), $id]);
+        $estadoAnteriorId = (int) $asistencia['estado_id'];
+
+        $this->db->beginTransaction();
+        try {
+            // Actualizar estado de la asistencia
+            $this->db->prepare("
+                UPDATE asistencias
+                SET estado_id = ?, modified_by = ?, modified_at = NOW()
+                WHERE id = ?
+            ")->execute([$nuevoEstadoId, $this->userId(), $id]);
+
+            // Registrar en asistencias_log (auditoría v2)
+            $this->db->prepare("
+                INSERT INTO asistencias_log
+                    (asistencia_id, estado_anterior_id, estado_nuevo_id, modified_by, observacion)
+                VALUES (?, ?, ?, ?, ?)
+            ")->execute([$id, $estadoAnteriorId, $nuevoEstadoId, $this->userId(), $observacion ?: null]);
+
+            $this->db->commit();
+        } catch (\Exception $e) {
+            $this->db->rollBack();
+            error_log('[AsistenciaWebController::updateReview] Error: ' . $e->getMessage());
+            Response::error('Error al actualizar la revisión. Intente nuevamente.', 500);
+        }
 
         Response::success(null, 'Revisión guardada correctamente');
     }
 
     /**
      * GET /v1/web/asistencias/semana
-     * Resumen de asistencias agrupado por día para la semana actual (o semana de ?fecha=YYYY-MM-DD).
-     * Filtros: ?sede_id=1  ?fecha=2025-06-10
+     * Resumen semanal.
      */
     public function resumenSemanal(Request $req): void
     {
         $sedeId = $req->query('sede_id');
-        // Si vienen una fecha, usar su semana; si no, la semana actual
         $fechaRef = $req->query('fecha', date('Y-m-d'));
         $dt = new \DateTime($fechaRef);
 
-        // Calcular lunes y domingo de la semana
-        $dow    = (int) $dt->format('N'); // 1=lunes … 7=domingo
+        $dow    = (int) $dt->format('N');
         $lunes  = (clone $dt)->modify('-' . ($dow - 1) . ' days')->format('Y-m-d');
         $domingo = (clone $dt)->modify('+' . (7 - $dow) . ' days')->format('Y-m-d');
 
         $whereSede = '1=1';
         $params    = [':fi' => $lunes, ':ff' => $domingo];
 
-        // Supervisor: solo sus sedes
         if ($this->rol() === 'supervisor') {
-            $whereSede = "a.sede_id IN (
-                SELECT sede_id FROM usuario_web_sede
-                WHERE usuario_web_id = :uid AND activo = 1
-            )";
-            $params[':uid'] = $this->userId();
+            $misSedes = $this->sedesDelSupervisor();
+            if (empty($misSedes)) {
+                Response::success(['semana_inicio' => $lunes, 'semana_fin' => $domingo, 'dias' => []]);
+                return;
+            }
+            $in = implode(',', array_map('intval', $misSedes));
+            $whereSede = "us.sede_id IN ({$in})";
         }
 
         if ($sedeId) {
-            $whereSede .= ' AND a.sede_id = :sid';
+            $whereSede .= ' AND us.sede_id = :sid';
             $params[':sid'] = (int) $sedeId;
         }
 
-        // Totales por día de la semana
         $stmt = $this->db->prepare("
             SELECT
                 a.fecha,
-                DAYNAME(a.fecha)                          AS dia_nombre,
-                COUNT(*)                                  AS total,
-                SUM(a.estado_diario = 'PRESENTE')         AS presentes,
-                SUM(a.estado_diario = 'TARDANZA')         AS tardanzas,
-                SUM(a.estado_diario = 'FALTA')            AS faltas,
-                SUM(a.estado_diario = 'JUSTIFICADO')      AS justificados,
-                SUM(a.estado_diario = 'PENDIENTE')        AS pendientes,
-                SUM(ad.estado_marcacion = 'OBSERVADA'
-                    AND ad.estado_revision = 'PENDIENTE') AS observadas_pendientes
+                DAYNAME(a.fecha) AS dia_nombre,
+                COUNT(*)                               AS total,
+                SUM(ea.nombre = 'PRESENTE')            AS presentes,
+                SUM(ea.nombre = 'TARDANZA')            AS tardanzas,
+                SUM(ea.nombre = 'FALTA')               AS faltas,
+                SUM(ea.nombre = 'JUSTIFICADO')         AS justificados,
+                SUM(ea.nombre = 'PENDIENTE')           AS pendientes
             FROM asistencias a
-            LEFT JOIN asistencias_diarias ad ON ad.asistencia_id = a.id
+            INNER JOIN estados_asistencia ea ON ea.id = a.estado_id
+            INNER JOIN usuario_sede us ON us.id = a.usuario_sede_id
             WHERE {$whereSede}
               AND a.fecha BETWEEN :fi AND :ff
             GROUP BY a.fecha
@@ -227,30 +309,32 @@ class AsistenciaWebController extends BaseWebController
         $whereSede = '1=1';
         $params    = [':mes' => $mes, ':anio' => $anio];
 
-        // ROL SUPERVISOR
         if ($this->rol() === 'supervisor') {
-            $whereSede = "sede_id IN (
-                SELECT sede_id FROM usuario_web_sede
-                WHERE usuario_web_id = :uid AND activo = 1
-            )";
-            $params[':uid'] = $this->userId();
+            $misSedes = $this->sedesDelSupervisor();
+            if (empty($misSedes)) {
+                Response::success(['labels' => [], 'asistencias' => [], 'faltas' => [], 'periodo' => ['mes' => '']]);
+                return;
+            }
+            $in = implode(',', array_map('intval', $misSedes));
+            $whereSede = "us.sede_id IN ({$in})";
         }
 
-        // Si mandan sede por parametro
         if ($req->query('sede_id')) {
-            $whereSede .= ' AND sede_id = :sid';
+            $whereSede .= ' AND us.sede_id = :sid';
             $params[':sid'] = (int) $req->query('sede_id');
         }
 
         $stmt = $this->db->prepare("
             SELECT
-                DAY(fecha) as dia,
-                SUM(estado_diario IN ('PRESENTE', 'TARDANZA', 'JUSTIFICADO', 'SALIDA ANTES')) as asistencias,
-                SUM(estado_diario = 'FALTA') as faltas
-            FROM asistencias
-            WHERE {$whereSede} AND MONTH(fecha) = :mes AND YEAR(fecha) = :anio
-            GROUP BY fecha
-            ORDER BY fecha ASC
+                DAY(a.fecha) as dia,
+                SUM(ea.nombre IN ('PRESENTE', 'TARDANZA', 'JUSTIFICADO')) as asistencias,
+                SUM(ea.nombre = 'FALTA') as faltas
+            FROM asistencias a
+            INNER JOIN estados_asistencia ea ON ea.id = a.estado_id
+            INNER JOIN usuario_sede us ON us.id = a.usuario_sede_id
+            WHERE {$whereSede} AND MONTH(a.fecha) = :mes AND YEAR(a.fecha) = :anio
+            GROUP BY a.fecha
+            ORDER BY a.fecha ASC
         ");
         $stmt->execute($params);
         $rows = $stmt->fetchAll();
@@ -287,79 +371,361 @@ class AsistenciaWebController extends BaseWebController
         ]);
     }
 
-    /**
-     * GET /v1/web/asistencias/exportar
-     */
-    public function exportar(Request $req): void
+    private function enviarExcel(array $registros, string $filename, array $columnas, callable $rowCallback): void
+    {
+        header('Content-Type: application/vnd.ms-excel; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '.xls"');
+        echo "\xEF\xBB\xBF"; // UTF-8 BOM
+        
+        echo "<table border='1' style='border-collapse:collapse; font-family:Arial, sans-serif;'>";
+        echo "<tr style='background-color:#1e293b; color:white; font-weight:bold;'>";
+        foreach ($columnas as $col) {
+            echo "<th style='padding:8px;'>" . htmlspecialchars($col) . "</th>";
+        }
+        echo "</tr>";
+        
+        if ($registros) {
+            foreach ($registros as $r) {
+                echo "<tr>";
+                $rowCallback($r);
+                echo "</tr>";
+            }
+        } else {
+            echo "<tr><td colspan='" . count($columnas) . "' style='text-align:center; padding:12px; color:#94a3b8;'>No hay registros que coincidan con la búsqueda</td></tr>";
+        }
+        echo "</table>";
+        exit;
+    }
+
+    /** GET /v1/web/reportes/consolidado */
+    public function reporteConsolidado(Request $req): void
     {
         $params = [];
         $where  = [];
 
-        // Scope de supervisor
         if ($this->rol() === 'supervisor') {
-            $where[]        = "a.sede_id IN (
-                SELECT sede_id FROM usuario_web_sede
-                WHERE usuario_web_id = :uid AND activo = 1
-            )";
-            $params[':uid'] = $this->userId();
+            $misSedes = $this->sedesDelSupervisor();
+            if (empty($misSedes)) {
+                $registros = [];
+            } else {
+                $in = implode(',', array_map('intval', $misSedes));
+                $where[] = "us.sede_id IN ({$in})";
+            }
         }
 
-        if ($req->query('sede_id')) {
-            $where[]          = 'a.sede_id = :sid';
-            $params[':sid']   = (int) $req->query('sede_id');
+        if (!isset($registros)) {
+            if ($req->query('sede_id')) {
+                $where[]        = 'us.sede_id = :sid';
+                $params[':sid'] = (int) $req->query('sede_id');
+            }
+            if ($req->query('fecha_inicio')) {
+                $where[]        = 'a.fecha >= :fi';
+                $params[':fi']  = $req->query('fecha_inicio');
+            }
+            if ($req->query('fecha_fin')) {
+                $where[]        = 'a.fecha <= :ff';
+                $params[':ff']  = $req->query('fecha_fin');
+            }
+
+            $whereSQL = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+
+            $stmt = $this->db->prepare("
+                SELECT
+                    u.codigo_empleado,
+                    CONCAT(IFNULL(ut.apellidos,''), ', ', IFNULL(ut.nombres,'')) AS trabajador,
+                    ut.dni,
+                    s.nombre          AS sede,
+                    hs.nombre         AS turno,
+                    a.fecha,
+                    a.minutos_tarde,
+                    ea.nombre         AS estado,
+                    entrada.fecha_hora AS entrada_fecha_hora,
+                    salida.fecha_hora  AS salida_fecha_hora
+                FROM asistencias a
+                INNER JOIN estados_asistencia ea ON ea.id = a.estado_id
+                INNER JOIN usuario_sede us  ON us.id = a.usuario_sede_id
+                INNER JOIN usuarios u       ON u.id = us.usuario_id
+                LEFT JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
+                INNER JOIN sedes s          ON s.id = us.sede_id
+                INNER JOIN horarios_sede hs ON hs.id = us.horario_id
+                LEFT JOIN marcaciones entrada
+                       ON entrada.asistencia_id = a.id AND entrada.tipo_id = 1 AND entrada.activo = 1
+                LEFT JOIN marcaciones salida
+                       ON salida.asistencia_id = a.id  AND salida.tipo_id = 2 AND salida.activo = 1
+                {$whereSQL}
+                ORDER BY a.fecha DESC, ut.apellidos ASC
+                LIMIT 5000
+            ");
+            $stmt->execute($params);
+            $registros = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         }
+
+        $columnas = ['Código Empleado', 'Trabajador', 'DNI', 'Sede', 'Turno', 'Fecha', 'Minutos Tarde', 'Estado', 'Entrada', 'Salida'];
+        $filename = 'reporte_consolidado_' . date('Ymd_His');
+
+        $this->enviarExcel($registros, $filename, $columnas, function($r) {
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['codigo_empleado']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['trabajador']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['dni']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['sede']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['turno'] ?? 'Sin turno') . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['fecha']) . "</td>";
+            echo "<td style='padding:8px; text-align:right;'>" . (int)$r['minutos_tarde'] . "</td>";
+            
+            $color = '#475569'; $bg = '#f1f5f9';
+            if ($r['estado'] === 'PRESENTE') { $color = '#15803d'; $bg = '#dcfce7'; }
+            elseif ($r['estado'] === 'TARDANZA') { $color = '#b45309'; $bg = '#fef3c7'; }
+            elseif ($r['estado'] === 'FALTA') { $color = '#b91c1c'; $bg = '#fee2e2'; }
+            elseif ($r['estado'] === 'JUSTIFICADO') { $color = '#4338ca'; $bg = '#e0e7ff'; }
+            
+            echo "<td style='padding:8px; background-color:$bg; color:$color; font-weight:bold; text-align:center;'>" . htmlspecialchars($r['estado']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['entrada_fecha_hora'] ?? '—') . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['salida_fecha_hora'] ?? '—') . "</td>";
+        });
+    }
+
+    /** GET /v1/web/reportes/individual */
+    public function reporteIndividual(Request $req): void
+    {
+        $usuarioId = (int)$req->query('usuario_id');
+        if (!$usuarioId) {
+            Response::error('El ID del trabajador es requerido', 400);
+        }
+
+        $params = [':uid' => $usuarioId];
+        $where  = ['us.usuario_id = :uid'];
+
         if ($req->query('fecha_inicio')) {
-            $where[]          = 'a.fecha >= :fi';
-            $params[':fi']    = $req->query('fecha_inicio');
+            $where[]        = 'a.fecha >= :fi';
+            $params[':fi']  = $req->query('fecha_inicio');
         }
         if ($req->query('fecha_fin')) {
-            $where[]          = 'a.fecha <= :ff';
-            $params[':ff']    = $req->query('fecha_fin');
-        }
-        if ($req->query('estado_diario')) {
-            $where[]          = 'a.estado_diario = :ed';
-            $params[':ed']    = $req->query('estado_diario');
+            $where[]        = 'a.fecha <= :ff';
+            $params[':ff']  = $req->query('fecha_fin');
         }
 
-        $whereSQL = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+        $whereSQL = 'WHERE ' . implode(' AND ', $where);
 
         $stmt = $this->db->prepare("
             SELECT
-                u.codigo_empleado,
-                CONCAT(u.apellido_paterno, ' ', u.apellido_materno, ', ', u.nombres) AS trabajador,
-                u.dni,
-                s.nombre          AS sede,
-                hs.nombre_turno   AS turno,
                 a.fecha,
-                a.hora_entrada,
-                a.hora_salida,
+                s.nombre          AS sede,
+                hs.nombre         AS turno,
                 a.minutos_tarde,
-                a.estado_diario,
-                a.observacion,
-                entrada.marcada_en        AS entrada_marcada_en,
-                entrada.estado_marcacion  AS entrada_estado_marcacion,
-                entrada.distancia_metros  AS entrada_distancia_metros,
-                salida.marcada_en         AS salida_marcada_en,
-                salida.estado_marcacion   AS salida_estado_marcacion,
-                salida.distancia_metros   AS salida_distancia_metros
+                ea.nombre         AS estado,
+                entrada.fecha_hora AS entrada_fecha_hora,
+                salida.fecha_hora  AS salida_fecha_hora
             FROM asistencias a
-            INNER JOIN usuarios_app u  ON u.id = a.usuario_app_id
-            INNER JOIN sedes s         ON s.id = a.sede_id
-            INNER JOIN horarios_sede hs ON hs.id = a.horario_sede_id
-            LEFT JOIN asistencias_diarias entrada
-                   ON entrada.asistencia_id = a.id AND entrada.tipo = 'ENTRADA'
-            LEFT JOIN asistencias_diarias salida
-                   ON salida.asistencia_id = a.id  AND salida.tipo = 'SALIDA'
+            INNER JOIN estados_asistencia ea ON ea.id = a.estado_id
+            INNER JOIN usuario_sede us  ON us.id = a.usuario_sede_id
+            INNER JOIN sedes s          ON s.id = us.sede_id
+            INNER JOIN horarios_sede hs ON hs.id = us.horario_id
+            LEFT JOIN marcaciones entrada
+                   ON entrada.asistencia_id = a.id AND entrada.tipo_id = 1 AND entrada.activo = 1
+            LEFT JOIN marcaciones salida
+                   ON salida.asistencia_id = a.id  AND salida.tipo_id = 2 AND salida.activo = 1
             {$whereSQL}
-            ORDER BY a.fecha DESC, u.apellido_paterno ASC
+            ORDER BY a.fecha DESC
             LIMIT 5000
         ");
         $stmt->execute($params);
-        $registros = $stmt->fetchAll();
+        $registros = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
-        Response::success([
-            'total'      => count($registros),
-            'registros'  => $registros,
-        ]);
+        $stmtUser = $this->db->prepare("
+            SELECT CONCAT(IFNULL(nombres,''), ' ', IFNULL(apellidos,'')) AS nombre_completo, dni 
+            FROM usuarios_trabajador WHERE usuario_id = ?
+        ");
+        $stmtUser->execute([$usuarioId]);
+        $userInfo = $stmtUser->fetch();
+        $nombreTrabajador = $userInfo ? $userInfo['nombre_completo'] : 'Trabajador';
+
+        $columnas = ['Fecha', 'Sede', 'Turno', 'Entrada', 'Salida', 'Minutos Tarde', 'Estado'];
+        $filename = 'reporte_individual_' . str_replace(' ', '_', strtolower($nombreTrabajador)) . '_' . date('Ymd_His');
+
+        $this->enviarExcel($registros, $filename, $columnas, function($r) {
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['fecha']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['sede']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['turno'] ?? 'Sin turno') . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['entrada_fecha_hora'] ?? '—') . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['salida_fecha_hora'] ?? '—') . "</td>";
+            echo "<td style='padding:8px; text-align:right;'>" . (int)$r['minutos_tarde'] . "</td>";
+
+            $color = '#475569'; $bg = '#f1f5f9';
+            if ($r['estado'] === 'PRESENTE') { $color = '#15803d'; $bg = '#dcfce7'; }
+            elseif ($r['estado'] === 'TARDANZA') { $color = '#b45309'; $bg = '#fef3c7'; }
+            elseif ($r['estado'] === 'FALTA') { $color = '#b91c1c'; $bg = '#fee2e2'; }
+            elseif ($r['estado'] === 'JUSTIFICADO') { $color = '#4338ca'; $bg = '#e0e7ff'; }
+
+            echo "<td style='padding:8px; background-color:$bg; color:$color; font-weight:bold; text-align:center;'>" . htmlspecialchars($r['estado']) . "</td>";
+        });
+    }
+
+    /** GET /v1/web/reportes/sedes */
+    public function reporteSedes(Request $req): void
+    {
+        $params = [];
+        $where  = [];
+
+        if ($this->rol() === 'supervisor') {
+            $misSedes = $this->sedesDelSupervisor();
+            if (empty($misSedes)) {
+                $registros = [];
+            } else {
+                $in = implode(',', array_map('intval', $misSedes));
+                $where[] = "us.sede_id IN ({$in})";
+            }
+        }
+
+        if (!isset($registros)) {
+            if ($req->query('sede_id')) {
+                $where[]        = 'us.sede_id = :sid';
+                $params[':sid'] = (int) $req->query('sede_id');
+            }
+            if ($req->query('fecha_inicio')) {
+                $where[]        = 'a.fecha >= :fi';
+                $params[':fi']  = $req->query('fecha_inicio');
+            }
+            if ($req->query('fecha_fin')) {
+                $where[]        = 'a.fecha <= :ff';
+                $params[':ff']  = $req->query('fecha_fin');
+            }
+
+            $whereSQL = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+
+            $stmt = $this->db->prepare("
+                SELECT
+                    s.nombre          AS sede,
+                    u.codigo_empleado,
+                    CONCAT(IFNULL(ut.apellidos,''), ', ', IFNULL(ut.nombres,'')) AS trabajador,
+                    ut.dni,
+                    a.fecha,
+                    hs.nombre         AS turno,
+                    entrada.fecha_hora AS entrada_fecha_hora,
+                    salida.fecha_hora  AS salida_fecha_hora,
+                    a.minutos_tarde,
+                    ea.nombre         AS estado
+                FROM asistencias a
+                INNER JOIN estados_asistencia ea ON ea.id = a.estado_id
+                INNER JOIN usuario_sede us  ON us.id = a.usuario_sede_id
+                INNER JOIN usuarios u       ON u.id = us.usuario_id
+                LEFT JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
+                INNER JOIN sedes s          ON s.id = us.sede_id
+                INNER JOIN horarios_sede hs ON hs.id = us.horario_id
+                LEFT JOIN marcaciones entrada
+                       ON entrada.asistencia_id = a.id AND entrada.tipo_id = 1 AND entrada.activo = 1
+                LEFT JOIN marcaciones salida
+                       ON salida.asistencia_id = a.id  AND salida.tipo_id = 2 AND salida.activo = 1
+                {$whereSQL}
+                ORDER BY s.nombre ASC, a.fecha DESC, ut.apellidos ASC
+                LIMIT 5000
+            ");
+            $stmt->execute($params);
+            $registros = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        }
+
+        $columnas = ['Sede', 'Código Empleado', 'Trabajador', 'DNI', 'Fecha', 'Turno', 'Entrada', 'Salida', 'Minutos Tarde', 'Estado'];
+        $filename = 'reporte_por_sedes_' . date('Ymd_His');
+
+        $this->enviarExcel($registros, $filename, $columnas, function($r) {
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['sede']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['codigo_empleado']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['trabajador']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['dni']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['fecha']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['turno'] ?? 'Sin turno') . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['entrada_fecha_hora'] ?? '—') . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['salida_fecha_hora'] ?? '—') . "</td>";
+            echo "<td style='padding:8px; text-align:right;'>" . (int)$r['minutos_tarde'] . "</td>";
+
+            $color = '#475569'; $bg = '#f1f5f9';
+            if ($r['estado'] === 'PRESENTE') { $color = '#15803d'; $bg = '#dcfce7'; }
+            elseif ($r['estado'] === 'TARDANZA') { $color = '#b45309'; $bg = '#fef3c7'; }
+            elseif ($r['estado'] === 'FALTA') { $color = '#b91c1c'; $bg = '#fee2e2'; }
+            elseif ($r['estado'] === 'JUSTIFICADO') { $color = '#4338ca'; $bg = '#e0e7ff'; }
+
+            echo "<td style='padding:8px; background-color:$bg; color:$color; font-weight:bold; text-align:center;'>" . htmlspecialchars($r['estado']) . "</td>";
+        });
+    }
+
+    /** GET /v1/web/reportes/mensual */
+    public function reporteMensual(Request $req): void
+    {
+        $mes = (int)$req->query('mes', date('m'));
+        $anio = (int)$req->query('anio', date('Y'));
+
+        $params = [':mes' => $mes, ':anio' => $anio];
+        $where  = ['MONTH(a.fecha) = :mes', 'YEAR(a.fecha) = :anio'];
+
+        if ($this->rol() === 'supervisor') {
+            $misSedes = $this->sedesDelSupervisor();
+            if (empty($misSedes)) {
+                $registros = [];
+            } else {
+                $in = implode(',', array_map('intval', $misSedes));
+                $where[] = "us.sede_id IN ({$in})";
+            }
+        }
+
+        if (!isset($registros)) {
+            if ($req->query('sede_id')) {
+                $where[]        = 'us.sede_id = :sid';
+                $params[':sid'] = (int) $req->query('sede_id');
+            }
+
+            $whereSQL = 'WHERE ' . implode(' AND ', $where);
+
+            $stmt = $this->db->prepare("
+                SELECT
+                    u.codigo_empleado,
+                    CONCAT(IFNULL(ut.apellidos,''), ', ', IFNULL(ut.nombres,'')) AS trabajador,
+                    ut.dni,
+                    s.nombre          AS sede,
+                    hs.nombre         AS turno,
+                    a.fecha,
+                    a.minutos_tarde,
+                    ea.nombre         AS estado,
+                    entrada.fecha_hora AS entrada_fecha_hora,
+                    salida.fecha_hora  AS salida_fecha_hora
+                FROM asistencias a
+                INNER JOIN estados_asistencia ea ON ea.id = a.estado_id
+                INNER JOIN usuario_sede us  ON us.id = a.usuario_sede_id
+                INNER JOIN usuarios u       ON u.id = us.usuario_id
+                LEFT JOIN usuarios_trabajador ut ON ut.usuario_id = u.id
+                INNER JOIN sedes s          ON s.id = us.sede_id
+                INNER JOIN horarios_sede hs ON hs.id = us.horario_id
+                LEFT JOIN marcaciones entrada
+                       ON entrada.asistencia_id = a.id AND entrada.tipo_id = 1 AND entrada.activo = 1
+                LEFT JOIN marcaciones salida
+                       ON salida.asistencia_id = a.id  AND salida.tipo_id = 2 AND salida.activo = 1
+                {$whereSQL}
+                ORDER BY a.fecha DESC, ut.apellidos ASC
+                LIMIT 5000
+            ");
+            $stmt->execute($params);
+            $registros = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        }
+
+        $columnas = ['Código Empleado', 'Trabajador', 'DNI', 'Sede', 'Turno', 'Fecha', 'Minutos Tarde', 'Estado', 'Entrada', 'Salida'];
+        $filename = "reporte_mensual_{$anio}_{$mes}_" . date('Ymd_His');
+
+        $this->enviarExcel($registros, $filename, $columnas, function($r) {
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['codigo_empleado']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['trabajador']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['dni']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['sede']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['turno'] ?? 'Sin turno') . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['fecha']) . "</td>";
+            echo "<td style='padding:8px; text-align:right;'>" . (int)$r['minutos_tarde'] . "</td>";
+
+            $color = '#475569'; $bg = '#f1f5f9';
+            if ($r['estado'] === 'PRESENTE') { $color = '#15803d'; $bg = '#dcfce7'; }
+            elseif ($r['estado'] === 'TARDANZA') { $color = '#b45309'; $bg = '#fef3c7'; }
+            elseif ($r['estado'] === 'FALTA') { $color = '#b91c1c'; $bg = '#fee2e2'; }
+            elseif ($r['estado'] === 'JUSTIFICADO') { $color = '#4338ca'; $bg = '#e0e7ff'; }
+
+            echo "<td style='padding:8px; background-color:$bg; color:$color; font-weight:bold; text-align:center;'>" . htmlspecialchars($r['estado']) . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['entrada_fecha_hora'] ?? '—') . "</td>";
+            echo "<td style='padding:8px;'>" . htmlspecialchars($r['salida_fecha_hora'] ?? '—') . "</td>";
+        });
     }
 }

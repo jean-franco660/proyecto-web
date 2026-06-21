@@ -14,10 +14,6 @@
           <option value="OBSERVADA">Observadas</option>
         </select>
         <button @click="fetchAsistencias" class="btn-primary py-1.5 text-sm">Filtrar</button>
-        <button @click="exportarCSV" class="px-4 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium flex items-center space-x-1 transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-          <span>Exportar</span>
-        </button>
       </div>
     </div>
 
@@ -102,6 +98,16 @@
           </tr>
         </tbody>
       </table>
+      <!-- Paginación -->
+      <div class="bg-slate-50 px-6 py-3 border-t border-slate-200 flex items-center justify-between">
+        <div class="text-sm text-slate-500">
+          Mostrando página <span class="font-medium">{{ currentPage }}</span> de <span class="font-medium">{{ totalPages }}</span> ({{ totalItems }} registros)
+        </div>
+        <div class="flex space-x-2">
+          <button @click="goToPage(currentPage - 1)" :disabled="currentPage <= 1" class="px-3 py-1 border border-slate-300 rounded text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed">Anterior</button>
+          <button @click="goToPage(currentPage + 1)" :disabled="currentPage >= totalPages" class="px-3 py-1 border border-slate-300 rounded text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed">Siguiente</button>
+        </div>
+      </div>
     </div>
 
     <!-- Empty State -->
@@ -182,6 +188,11 @@ const isModalOpen = ref(false)
 const saving = ref(false)
 const selectedItem = ref(null)
 
+const currentPage = ref(1)
+const totalPages = ref(1)
+const totalItems = ref(0)
+const perPage = ref(25)
+
 const today = new Date()
 const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
 const formatDateLocal = (date) => {
@@ -203,21 +214,47 @@ const formReview = reactive({
   observacion: ''
 })
 
-const fetchAsistencias = async () => {
+const fetchAsistencias = async (page = 1) => {
+  if (filters.fecha_inicio && filters.fecha_fin) {
+    if (new Date(filters.fecha_inicio) > new Date(filters.fecha_fin)) {
+      toast.error('La fecha de inicio no puede ser posterior a la fecha de fin.')
+      return
+    }
+  }
+
   loading.value = true
   error.value = null
+  currentPage.value = page
   try {
-    const params = {}
+    const params = {
+      page: currentPage.value,
+      per_page: perPage.value
+    }
     if (filters.fecha_inicio) params.fecha_inicio = filters.fecha_inicio
     if (filters.fecha_fin) params.fecha_fin = filters.fecha_fin
     if (filters.estado_marcacion) params.estado_marcacion = filters.estado_marcacion
 
     const response = await api.get('/v1/web/asistencias', { params })
-    asistencias.value = response.data.data || response.data
+    const result = response.data.data || response.data
+    
+    if (result.current_page) {
+      asistencias.value = result.data || []
+      currentPage.value = result.current_page
+      totalPages.value = result.last_page
+      totalItems.value = result.total
+    } else {
+      asistencias.value = result || []
+    }
   } catch (err) {
     error.value = 'Error al obtener asistencias'
   } finally {
     loading.value = false
+  }
+}
+
+const goToPage = (page) => {
+  if (page >= 1 && page <= totalPages.value) {
+    fetchAsistencias(page)
   }
 }
 
@@ -244,35 +281,6 @@ const saveReview = async () => {
     toast.error(err.response?.data?.error || 'Error al guardar la revisión')
   } finally {
     saving.value = false
-  }
-}
-
-// Exportar — llama al endpoint /v1/web/asistencias/exportar con los mismos filtros
-const exportarCSV = async () => {
-  try {
-    const params = {}
-    if (filters.fecha_inicio) params.fecha_inicio = filters.fecha_inicio
-    if (filters.fecha_fin) params.fecha_fin = filters.fecha_fin
-
-    const response = await api.get('/v1/web/asistencias/exportar', { params })
-    const registros = response.data.data?.registros || []
-    if (!registros.length) { toast.warning('No hay registros para exportar'); return }
-
-    // Generar CSV básico
-    const headers = Object.keys(registros[0]).join(',')
-    const rows = registros.map(r =>
-      Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')
-    )
-    const csv = [headers, ...rows].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `asistencias_${filters.fecha_inicio}_${filters.fecha_fin}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch (err) {
-    toast.error(err.response?.data?.error || 'Error al exportar el archivo')
   }
 }
 

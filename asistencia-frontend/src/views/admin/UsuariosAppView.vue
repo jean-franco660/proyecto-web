@@ -3,7 +3,15 @@
     <div class="flex justify-between items-center pb-4 border-b border-slate-200">
       <h2 class="text-2xl font-bold text-slate-800">Trabajadores</h2>
       <div class="flex space-x-3">
-         <button @click="openModal()" class="btn-primary flex items-center space-x-2">
+         <button @click="openResetsModal()" class="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition-colors font-medium shadow-sm flex items-center space-x-2 text-sm">
+          <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+          <span>Solicitudes de Contraseña</span>
+         </button>
+         <button @click="openImportModal()" class="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition-colors font-medium shadow-sm flex items-center space-x-2 text-sm">
+          <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+          <span>Importar Excel</span>
+         </button>
+         <button @click="openModal()" class="btn-primary flex items-center space-x-2 text-sm">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
           <span>Nuevo Trabajador</span>
         </button>
@@ -201,15 +209,148 @@
       </div>
     </div>
 
+    <!-- Modal (Solicitudes de Recuperación de Contraseña) -->
+    <div v-if="isResetsModalOpen" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl p-6 w-full max-w-2xl shadow-xl max-h-[85vh] flex flex-col">
+        <div class="flex justify-between items-center pb-3 border-b border-slate-100">
+          <h3 class="text-lg font-bold text-slate-800">Solicitudes de Recuperación de Contraseña (App)</h3>
+          <button @click="isResetsModalOpen = false" class="text-slate-400 hover:text-slate-600">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto py-4">
+          <!-- Alerta de Contraseña Temporal Generada -->
+          <div v-if="tempPasswordGenerated" class="mb-4 bg-green-50 border border-green-200 rounded-xl p-4 text-green-800">
+            <div class="flex items-center space-x-2">
+              <svg class="w-5 h-5 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+              <h4 class="font-bold">¡Clave Temporal Generada con Éxito!</h4>
+            </div>
+            <p class="text-sm mt-1">Trabajador: <strong>{{ tempPasswordUser }}</strong></p>
+            <div class="mt-3 bg-white p-3 rounded-lg border border-green-100 flex items-center justify-between">
+              <span class="font-mono text-xl font-bold tracking-wider text-green-700">{{ tempPasswordGenerated }}</span>
+              <span class="text-xs text-slate-400">Entrega este código de 6 dígitos al trabajador</span>
+            </div>
+          </div>
+
+          <div v-if="loadingResets" class="text-center py-8">
+            <div class="animate-spin inline-block w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full mb-2"></div>
+            <p class="text-sm text-slate-500">Cargando solicitudes...</p>
+          </div>
+
+          <div v-else-if="!resetsList.length" class="text-center py-8 text-slate-400">
+            <svg class="w-12 h-12 mx-auto mb-2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+            <p class="text-sm font-medium">No hay solicitudes de recuperación pendientes</p>
+          </div>
+
+          <div v-else class="border border-slate-100 rounded-xl overflow-hidden">
+            <table class="min-w-full divide-y divide-slate-200">
+              <thead class="bg-slate-50">
+                <tr>
+                  <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">Trabajador</th>
+                  <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">DNI / Código</th>
+                  <th class="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase">Fecha</th>
+                  <th class="px-4 py-2.5 text-right text-xs font-semibold text-slate-500 uppercase">Acciones</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 bg-white">
+                <tr v-for="reset in resetsList" :key="reset.id" class="hover:bg-slate-50 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <p class="text-sm font-medium text-slate-800">{{ reset.nombres }} {{ reset.apellidos }}</p>
+                  </td>
+                  <td class="px-4 py-2.5 text-xs text-slate-500">
+                    <p>DNI: {{ reset.dni }}</p>
+                    <p>Cod: {{ reset.codigo_empleado }}</p>
+                  </td>
+                  <td class="px-4 py-2.5 text-xs text-slate-500">
+                    {{ new Date(reset.created_at).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) }}
+                  </td>
+                  <td class="px-4 py-2.5 text-right space-x-2">
+                    <button @click="aprobarReset(reset)" class="px-2 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors">
+                      Aprobar
+                    </button>
+                    <button @click="rechazarReset(reset)" class="px-2 py-1 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors">
+                      Rechazar
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-100 flex justify-end">
+          <button @click="isResetsModalOpen = false" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium">
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Importación Excel (Trabajadores) -->
+    <div v-if="isImportModalOpen" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl p-6 w-full max-w-lg shadow-xl flex flex-col max-h-[90vh]">
+        <div class="flex justify-between items-center pb-3 border-b border-slate-100">
+          <h3 class="text-lg font-bold text-slate-800">Importar Trabajadores desde Excel (CSV)</h3>
+          <button @click="isImportModalOpen = false" class="text-slate-400 hover:text-slate-600">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
+        </div>
+
+        <div class="py-4 space-y-4 flex-1 overflow-y-auto">
+          <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
+            <p class="font-bold">Estructura requerida del archivo CSV:</p>
+            <p class="font-mono bg-white p-1.5 rounded border border-slate-100 overflow-x-auto select-all">codigo_empleado,nombres,apellidos,dni,email,telefono,password,cargo,condicion_laboral,sede_codigo,horario_nombre</p>
+            <p class="mt-1">* Nota: Los campos codigo_empleado, nombres, apellidos y DNI son requeridos. El correo se autogenera si se deja vacío. Si se define un codigo de sede y nombre de horario válidos, se creará la asignación automática.</p>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Seleccionar archivo</label>
+            <input type="file" ref="fileInput" accept=".csv" class="input-field py-1.5 text-sm">
+          </div>
+
+          <!-- Resultados de importación -->
+          <div v-if="importResults" class="p-3 rounded-lg border text-sm max-h-[200px] overflow-y-auto" :class="importResults.errores.length ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-green-50 border-green-200 text-green-800'">
+            <p class="font-bold">Resultados:</p>
+            <p>Procesados: {{ importResults.total_procesados }} | Exitosos: {{ importResults.exitosos }} | Errores: {{ importResults.errores.length }}</p>
+            <ul v-if="importResults.errores.length" class="list-disc list-inside mt-2 text-xs space-y-1 text-red-600">
+              <li v-for="(err, idx) in importResults.errores" :key="idx">{{ err }}</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-100 flex justify-end space-x-2">
+          <button @click="isImportModalOpen = false" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium">Cancelar</button>
+          <button @click="uploadFile" class="btn-primary" :disabled="importing">
+            {{ importing ? 'Procesando...' : 'Importar' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import api from '@/api/axios'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/store/auth'
 
 const toast = useToast()
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.isAdmin)
+
+const isResetsModalOpen = ref(false)
+const resetsList = ref([])
+const loadingResets = ref(false)
+const tempPasswordGenerated = ref(null)
+const tempPasswordUser = ref(null)
+
+const isImportModalOpen = ref(false)
+const fileInput = ref(null)
+const importing = ref(false)
+const importResults = ref(null)
 
 const usuarios = ref([])
 const horariosList = ref([])
@@ -312,21 +453,85 @@ const closeHorarioModal = () => {
 }
 
 const saveItem = async () => {
+  form.nombres = form.nombres ? form.nombres.trim() : ''
+  form.apellido_paterno = form.apellido_paterno ? form.apellido_paterno.trim() : ''
+  form.apellido_materno = form.apellido_materno ? form.apellido_materno.trim() : ''
+  form.dni = form.dni ? form.dni.trim() : ''
+  form.codigo_modular = form.codigo_modular ? form.codigo_modular.trim() : ''
+  form.email = form.email ? form.email.trim() : ''
+  form.password = form.password ? form.password.trim() : ''
+  form.cargo = form.cargo ? form.cargo.trim() : ''
+  form.condicion_laboral = form.condicion_laboral ? form.condicion_laboral.trim() : ''
+
+  if (!form.nombres) {
+    toast.error('El nombre es requerido')
+    return
+  }
+  if (!form.apellido_paterno) {
+    toast.error('El apellido paterno es requerido')
+    return
+  }
+  if (!form.dni || isNaN(form.dni) || form.dni.length < 8) {
+    toast.error('El DNI debe tener al menos 8 dígitos numéricos')
+    return
+  }
+  if (!form.codigo_modular) {
+    toast.error('El código modular es requerido')
+    return
+  }
+  if (form.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(form.email)) {
+      toast.error('Ingrese un correo electrónico válido')
+      return
+    }
+  }
+  if (!form.sede_id) {
+    toast.error('Debe seleccionar una sede')
+    return
+  }
+  if (!isEditing.value) {
+    if (!form.password) {
+      toast.error('La contraseña es requerida')
+      return
+    }
+    if (form.password.length < 6) {
+      toast.error('La contraseña debe tener al menos 6 caracteres')
+      return
+    }
+  } else {
+    if (form.password && form.password.length < 6) {
+      toast.error('La nueva contraseña debe tener al menos 6 caracteres')
+      return
+    }
+  }
+
   saving.value = true
   try {
-    const payload = { ...form }
-    if (isEditing.value && !payload.password) delete payload.password
+    const payload = { 
+      ...form,
+      nombres: form.nombres,
+      apellido_paterno: form.apellido_paterno,
+      apellido_materno: form.apellido_materno,
+      dni: form.dni,
+      codigo_modular: form.codigo_modular,
+      email: form.email,
+      password: form.password || undefined,
+      cargo: form.cargo,
+      condicion_laboral: form.condicion_laboral
+    }
+    if (isEditing.value && !form.password) delete payload.password
 
     if (isEditing.value) {
       const updatePayload = {
         ...payload,
-        asignaciones: form.sede_id ? [{ institucion_id: form.sede_id, cargo: form.cargo || 'DOCENTE', estado: 'ACTIVO' }] : []
+        asignaciones: form.sede_id ? [{ institucion_id: form.sede_id, cargo: cargo || 'DOCENTE', estado: 'ACTIVO' }] : []
       }
       await api.put(`/v1/web/usuarios-app/${form.id}`, updatePayload)
     } else {
       const createPayload = {
         ...payload,
-        asignaciones: form.sede_id ? [{ institucion_id: form.sede_id, cargo: form.cargo || 'DOCENTE', estado: 'ACTIVO' }] : []
+        asignaciones: form.sede_id ? [{ institucion_id: form.sede_id, cargo: cargo || 'DOCENTE', estado: 'ACTIVO' }] : []
       }
       await api.post('/v1/web/usuarios-app', createPayload)
     }
@@ -378,6 +583,80 @@ const deleteItem = async (id) => {
     fetchInicial()
   } catch (err) {
     toast.error(err.response?.data?.error || 'Error al eliminar')
+  }
+}
+
+const openResetsModal = () => {
+  tempPasswordGenerated.value = null
+  tempPasswordUser.value = null
+  isResetsModalOpen.value = true
+  fetchPasswordResets()
+}
+
+const fetchPasswordResets = async () => {
+  loadingResets.value = true
+  try {
+    const res = await api.get('/v1/web/password-resets-app?estado=PENDIENTE')
+    resetsList.value = res.data.data ?? res.data
+  } catch (err) {
+    toast.error('Error al cargar solicitudes de contraseña')
+  } finally {
+    loadingResets.value = false
+  }
+}
+
+const aprobarReset = async (reset) => {
+  try {
+    const res = await api.post(`/v1/web/password-resets-app/${reset.id}/aprobar`)
+    tempPasswordGenerated.value = res.data.data.temp_password
+    tempPasswordUser.value = `${reset.nombres} ${reset.apellidos}`
+    fetchPasswordResets()
+  } catch (err) {
+    toast.error(err.response?.data?.error || 'Error al aprobar la solicitud')
+  }
+}
+
+const rechazarReset = async (reset) => {
+  if (!confirm(`¿Rechazar solicitud de recuperación de contraseña de ${reset.nombres}?`)) return
+  try {
+    await api.post(`/v1/web/password-resets-app/${reset.id}/rechazar`)
+    toast.success('Solicitud rechazada')
+    fetchPasswordResets()
+  } catch (err) {
+    toast.error(err.response?.data?.error || 'Error al rechazar la solicitud')
+  }
+}
+
+const openImportModal = () => {
+  importResults.value = null
+  if (fileInput.value) fileInput.value.value = ''
+  isImportModalOpen.value = true
+}
+
+const uploadFile = async () => {
+  const file = fileInput.value.files[0]
+  if (!file) {
+    alert('Por favor seleccione un archivo CSV.')
+    return
+  }
+
+  const formData = new FormData()
+  formData.append('file', file)
+
+  importing.value = true
+  importResults.value = null
+  try {
+    const res = await api.post('/v1/web/usuarios-app/import', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    importResults.value = res.data.data
+    fetchInicial()
+  } catch (err) {
+    alert(err.response?.data?.error || 'Error al importar trabajadores')
+  } finally {
+    importing.value = false
   }
 }
 

@@ -5,7 +5,6 @@ use App\Controllers\App\AsistenciaAppController;
 use App\Controllers\App\SedeAppController;
 use App\Controllers\App\JustificacionAppController;
 use App\Controllers\App\HorarioAppController;
-use App\Controllers\App\SolicitudAusenciaAppController;
 
 use App\Controllers\Web\AuthWebController;
 use App\Controllers\Web\UsuarioWebController;
@@ -14,10 +13,9 @@ use App\Controllers\Web\SedeWebController;
 use App\Controllers\Web\HorarioWebController;
 use App\Controllers\Web\AsistenciaWebController;
 use App\Controllers\Web\JustificacionWebController;
-use App\Controllers\Web\FeriadoController;
 use App\Controllers\Web\StatsController;
-use App\Controllers\Web\DepartamentoController;
-use App\Controllers\Web\SolicitudAusenciaWebController;
+use App\Controllers\Web\DepartamentoWebController;
+use App\Controllers\Web\SolicitudesAusenciaWebController;
 
 use App\Middleware\AuthAppMiddleware;
 use App\Middleware\AuthWebMiddleware;
@@ -28,10 +26,12 @@ use App\Middleware\AuthWebMiddleware;
 
 // Públicas
 $router->post('/v1/app/login', [AuthAppController::class, 'login']);
+$router->post('/v1/app/password/reset-request', [AuthAppController::class, 'requestPasswordReset']);
 
 // Protegidas (JWT tipo 'app')
 $router->authAppGet('/v1/app/perfil',                    [AuthAppController::class, 'perfil']);
 $router->authAppPost('/v1/app/logout',                   [AuthAppController::class, 'logout']);
+$router->authAppPost('/v1/app/password/change',          [AuthAppController::class, 'changePassword']);
 $router->authAppGet('/v1/app/sedes',                     [SedeAppController::class, 'index']);
 
 // Asistencia (estáticas ANTES que dinámicas)
@@ -49,18 +49,13 @@ $router->authAppPost('/v1/app/justificaciones',          [JustificacionAppContro
 $router->authAppGet('/v1/app/justificaciones/{id}',      [JustificacionAppController::class, 'show']);
 $router->authAppDelete('/v1/app/justificaciones/{id}',   [JustificacionAppController::class, 'destroy']);
 
-// Solicitudes de ausencia (proactivo)
-$router->authAppGet('/v1/app/solicitudes-ausencia',           [SolicitudAusenciaAppController::class, 'index']);
-$router->authAppPost('/v1/app/solicitudes-ausencia',          [SolicitudAusenciaAppController::class, 'store']);
-$router->authAppGet('/v1/app/solicitudes-ausencia/{id}',      [SolicitudAusenciaAppController::class, 'show']);
-$router->authAppDelete('/v1/app/solicitudes-ausencia/{id}',   [SolicitudAusenciaAppController::class, 'destroy']);
-
 // ══════════════════════════════════════════════
 // PANEL WEB
 // ══════════════════════════════════════════════
 
 // Públicas
 $router->post('/v1/web/login', [AuthWebController::class, 'login']);
+$router->post('/v1/web/verify-2fa', [AuthWebController::class, 'verify2fa']);
 
 // Protegidas (JWT tipo 'web')
 $router->authWebPost('/v1/web/logout',                   [AuthWebController::class, 'logout']);
@@ -83,15 +78,28 @@ $router->authWebPatch('/v1/web/usuarios-app/{id}/estado',[UsuarioAppController::
 $router->authWebPatch('/v1/web/usuarios-app/{id}/horario',[UsuarioAppController::class, 'asignarHorario']);
 $router->authWebPost('/v1/web/usuario-app-institucion/{id}/inactivar',[UsuarioAppController::class, 'inactivarAsignacion']);
 $router->authWebGet('/v1/web/usuarios-app/import/stats',   [UsuarioAppController::class, 'importStats']);
+$router->authWebPost('/v1/web/usuarios-app/import',        [UsuarioAppController::class, 'importar']);
+
+// Recuperación de contraseñas de trabajadores (App)
+$router->authWebGet('/v1/web/password-resets-app',                [UsuarioAppController::class, 'listarPasswordResets']);
+$router->authWebPost('/v1/web/password-resets-app/{id}/aprobar',   [UsuarioAppController::class, 'aprobarPasswordReset']);
+$router->authWebPost('/v1/web/password-resets-app/{id}/rechazar',  [UsuarioAppController::class, 'rechazarPasswordReset']);
 
 // Sedes
 $router->authWebGet('/v1/web/sedes',                     [SedeWebController::class, 'index']);
 $router->authWebGet('/v1/web/sedes/mis-sedes',           [SedeWebController::class, 'misSedes']);
 $router->authWebGet('/v1/web/sedes/import/stats',        [SedeWebController::class, 'importStats']);
+$router->authWebPost('/v1/web/sedes/import',             [SedeWebController::class, 'importar']);
 $router->authWebPost('/v1/web/sedes',                    [SedeWebController::class, 'store']);
 $router->authWebGet('/v1/web/sedes/{id}',                [SedeWebController::class, 'show']);
 $router->authWebPut('/v1/web/sedes/{id}',                [SedeWebController::class, 'update']);
 $router->authWebDelete('/v1/web/sedes/{id}',             [SedeWebController::class, 'destroy']);
+
+// Departamentos
+$router->authWebGet('/v1/web/departamentos',               [DepartamentoWebController::class, 'index']);
+$router->authWebPost('/v1/web/departamentos',              [DepartamentoWebController::class, 'store']);
+$router->authWebPut('/v1/web/departamentos/{id}',          [DepartamentoWebController::class, 'update']);
+$router->authWebDelete('/v1/web/departamentos/{id}',       [DepartamentoWebController::class, 'destroy']);
 
 // Horarios
 $router->authWebGet('/v1/web/horarios',                  [HorarioWebController::class, 'index']);
@@ -100,26 +108,24 @@ $router->authWebPut('/v1/web/horarios/{id}',             [HorarioWebController::
 $router->authWebPut('/v1/web/horarios/{id}/dias',        [HorarioWebController::class, 'syncDias']);
 $router->authWebDelete('/v1/web/horarios/{id}',          [HorarioWebController::class, 'destroy']);
 
-// Departamentos
-$router->authWebGet('/v1/web/departamentos',             [DepartamentoController::class, 'index']);
-$router->authWebPost('/v1/web/departamentos',            [DepartamentoController::class, 'store']);
-$router->authWebGet('/v1/web/departamentos/{id}',        [DepartamentoController::class, 'show']);
-$router->authWebPut('/v1/web/departamentos/{id}',        [DepartamentoController::class, 'update']);
-$router->authWebDelete('/v1/web/departamentos/{id}',     [DepartamentoController::class, 'destroy']);
-
-// Feriados
-$router->authWebGet('/v1/web/feriados',                  [FeriadoController::class, 'index']);
-$router->authWebPost('/v1/web/feriados',                 [FeriadoController::class, 'store']);
-$router->authWebPut('/v1/web/feriados/{id}',             [FeriadoController::class, 'update']);
-$router->authWebDelete('/v1/web/feriados/{id}',          [FeriadoController::class, 'destroy']);
-
 // Asistencias (estáticas ANTES que dinámicas)
 $router->authWebGet('/v1/web/asistencias/semana',        [AsistenciaWebController::class, 'resumenSemanal']);
-$router->authWebGet('/v1/web/asistencias/exportar',      [AsistenciaWebController::class, 'exportar']);
 $router->authWebGet('/v1/web/asistencias/mes-grafico',   [AsistenciaWebController::class, 'mesGrafico']);
 $router->authWebGet('/v1/web/asistencias',               [AsistenciaWebController::class, 'index']);
 $router->authWebGet('/v1/web/asistencias/{id}',          [AsistenciaWebController::class, 'show']);
 $router->authWebPut('/v1/web/asistencias/{id}/review',   [AsistenciaWebController::class, 'updateReview']);
+
+// Reportes
+$router->authWebGet('/v1/web/reportes/consolidado',      [AsistenciaWebController::class, 'reporteConsolidado']);
+$router->authWebGet('/v1/web/reportes/individual',       [AsistenciaWebController::class, 'reporteIndividual']);
+$router->authWebGet('/v1/web/reportes/sedes',            [AsistenciaWebController::class, 'reporteSedes']);
+$router->authWebGet('/v1/web/reportes/mensual',          [AsistenciaWebController::class, 'reporteMensual']);
+
+// Feriados
+$router->authWebGet('/v1/web/feriados',                  [\App\Controllers\Web\FeriadoController::class, 'index']);
+$router->authWebPost('/v1/web/feriados',                 [\App\Controllers\Web\FeriadoController::class, 'store']);
+$router->authWebPut('/v1/web/feriados/{id}',             [\App\Controllers\Web\FeriadoController::class, 'update']);
+$router->authWebDelete('/v1/web/feriados/{id}',          [\App\Controllers\Web\FeriadoController::class, 'destroy']);
 
 // Justificaciones
 $router->authWebGet('/v1/web/justificaciones',               [JustificacionWebController::class, 'index']);
@@ -128,12 +134,10 @@ $router->authWebPost('/v1/web/justificaciones/{id}/aprobar', [JustificacionWebCo
 $router->authWebPost('/v1/web/justificaciones/{id}/rechazar',[JustificacionWebController::class, 'rechazar']);
 $router->authWebDelete('/v1/web/justificaciones/{id}',       [JustificacionWebController::class, 'destroy']);
 
-// Solicitudes de ausencia (proactivo — el empleado pide antes del hecho)
-$router->authWebGet('/v1/web/solicitudes-ausencia',               [SolicitudAusenciaWebController::class, 'index']);
-$router->authWebGet('/v1/web/solicitudes-ausencia/{id}',          [SolicitudAusenciaWebController::class, 'show']);
-$router->authWebPost('/v1/web/solicitudes-ausencia/{id}/aprobar', [SolicitudAusenciaWebController::class, 'aprobar']);
-$router->authWebPost('/v1/web/solicitudes-ausencia/{id}/rechazar',[SolicitudAusenciaWebController::class, 'rechazar']);
-$router->authWebDelete('/v1/web/solicitudes-ausencia/{id}',       [SolicitudAusenciaWebController::class, 'destroy']);
+// Solicitudes de Ausencia
+$router->authWebGet('/v1/web/solicitudes-ausencia',                [SolicitudesAusenciaWebController::class, 'index']);
+$router->authWebPost('/v1/web/solicitudes-ausencia/{id}/aprobar',   [SolicitudesAusenciaWebController::class, 'aprobar']);
+$router->authWebPost('/v1/web/solicitudes-ausencia/{id}/rechazar',  [SolicitudesAusenciaWebController::class, 'rechazar']);
 
 // Estadísticas
 // FIX Bug #12: StatsController solo tiene el método 'dashboard', no 'index'.

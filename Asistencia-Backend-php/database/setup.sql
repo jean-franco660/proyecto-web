@@ -1,428 +1,357 @@
--- ============================================================
--- SISTEMA DE ASISTENCIA — ESQUEMA COMPLETO Y DEFINITIVO
--- ============================================================
 
-CREATE DATABASE IF NOT EXISTS sistemas_asistencia_db
-CHARACTER SET utf8mb4
-COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS asistencia_pro
+CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-USE sistemas_asistencia_db;
+USE asistencia_pro;
 
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ============================================================
--- 1. USUARIOS
+-- 1. CATALOGOS
 -- ============================================================
-CREATE TABLE usuarios (
-    id                      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 
-    codigo                  VARCHAR(50)  NULL UNIQUE,
-    email                   VARCHAR(150) NULL UNIQUE,
-
-    nombres                 VARCHAR(150) NOT NULL,
-    apellido_paterno        VARCHAR(100) NULL,
-    apellido_materno        VARCHAR(100) NULL,
-
-    password                VARCHAR(255) NOT NULL,
-    password_temporal       TINYINT(1)   NOT NULL DEFAULT 0,
-
-    dni                     VARCHAR(20)  NULL UNIQUE,
-    telefono                VARCHAR(20)  NULL,
-    foto                    VARCHAR(500) NULL,
-
-    estado                  ENUM('ACTIVO','INACTIVO','BLOQUEADO') NOT NULL DEFAULT 'ACTIVO',
-
-    ultimo_login            DATETIME NULL,
-
-    created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at              TIMESTAMP NULL,
-
-    INDEX idx_usuarios_codigo  (codigo),
-    INDEX idx_usuarios_email   (email),
-    INDEX idx_usuarios_estado  (estado),
-    INDEX idx_usuarios_dni     (dni)
+CREATE TABLE estados_usuario (
+    id TINYINT PRIMARY KEY,
+    nombre VARCHAR(50) UNIQUE
 );
 
--- ============================================================
--- 2. ROLES
--- ============================================================
+INSERT INTO estados_usuario VALUES
+(1,'ACTIVO'), (2,'INACTIVO'), (3,'BLOQUEADO');
+
 CREATE TABLE roles (
-    id     INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    nombre VARCHAR(50) NOT NULL UNIQUE
+    id TINYINT PRIMARY KEY,
+    nombre VARCHAR(50) UNIQUE
 );
 
-INSERT INTO roles (nombre) VALUES
-('ADMINISTRADOR'),
-('SUPERVISOR'),
-('EMPLEADO');
+INSERT INTO roles VALUES
+(1,'ADMIN'), (2,'SUPERVISOR'), (3,'TRABAJADOR');
 
 -- ============================================================
--- 3. USUARIO ↔ ROL
+-- MEJORA 1: estados_justificacion SEPARADO
+-- Antes: justificaciones.estado_id → estados_asistencia
+--        lo que permitía estados como PRESENTE o TARDANZA
+--        en una justificación, lo cual no tiene sentido.
+-- Ahora: tabla propia con el ciclo de vida correcto.
 -- ============================================================
+
+CREATE TABLE estados_justificacion (
+    id TINYINT PRIMARY KEY,
+    nombre VARCHAR(50) UNIQUE
+);
+
+INSERT INTO estados_justificacion VALUES
+(1,'PENDIENTE'),
+(2,'APROBADA'),
+(3,'RECHAZADA');
+
+-- ============================================================
+-- 2. USUARIOS (BASE)
+-- ============================================================
+
+CREATE TABLE usuarios (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(150) UNIQUE NULL,
+    codigo_empleado VARCHAR(50) UNIQUE NULL,
+    password VARCHAR(255) NOT NULL,
+    debe_cambiar_password BOOLEAN DEFAULT FALSE,
+    verification_code VARCHAR(10) NULL,
+    verification_expires_at DATETIME NULL,
+    estado_id TINYINT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (estado_id) REFERENCES estados_usuario(id),
+
+    INDEX (email),
+    INDEX (codigo_empleado),
+    INDEX (estado_id)
+);
+
+-- ============================================================
+-- 3. RBAC (ROLES Y PERMISOS)
+-- ============================================================
+
 CREATE TABLE usuario_roles (
-    usuario_id INT UNSIGNED NOT NULL,
-    rol_id     INT UNSIGNED NOT NULL,
+    usuario_id INT UNSIGNED,
+    rol_id TINYINT,
+
     PRIMARY KEY (usuario_id, rol_id),
-    CONSTRAINT fk_ur_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
-    CONSTRAINT fk_ur_rol     FOREIGN KEY (rol_id)     REFERENCES roles(id)    ON DELETE CASCADE
+
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+    FOREIGN KEY (rol_id) REFERENCES roles(id) ON DELETE CASCADE
 );
 
 -- ============================================================
--- 4. DEPARTAMENTOS / ÁREAS
+-- 4. PERFILES
 -- ============================================================
-CREATE TABLE departamentos (
-    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    nombre      VARCHAR(150) NOT NULL,
-    descripcion TEXT NULL,
-    activo      TINYINT(1)   NOT NULL DEFAULT 1,
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+
+CREATE TABLE usuarios_trabajador (
+    usuario_id INT UNSIGNED PRIMARY KEY,
+    nombres VARCHAR(150) NOT NULL,
+    apellidos VARCHAR(150) NOT NULL,
+    dni VARCHAR(20) UNIQUE,
+    telefono VARCHAR(20),
+    foto VARCHAR(255),
+    fecha_nacimiento DATE NULL,
+
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);
+
+CREATE TABLE usuarios_staff (
+    usuario_id INT UNSIGNED PRIMARY KEY,
+    nombre VARCHAR(150) NOT NULL,
+
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
 );
 
 -- ============================================================
 -- 5. SEDES
 -- ============================================================
+
 CREATE TABLE sedes (
-    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    codigo_sede     VARCHAR(50)   NOT NULL UNIQUE,
-    nombre          VARCHAR(255)  NOT NULL,
-    direccion       VARCHAR(500)  NULL,
-    latitud         DECIMAL(10,8) NOT NULL,
-    longitud        DECIMAL(11,8) NOT NULL,
-    radio           INT           NOT NULL DEFAULT 100,  -- metros de tolerancia GPS
-    activa          TINYINT(1)    NOT NULL DEFAULT 1,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    codigo VARCHAR(50) UNIQUE,
+    nombre VARCHAR(255) NOT NULL,
+    direccion VARCHAR(500),
+    latitud DECIMAL(10,8) NOT NULL,
+    longitud DECIMAL(11,8) NOT NULL,
+    radio_metros INT NOT NULL DEFAULT 100,
+    activo BOOLEAN DEFAULT TRUE,
+
+    INDEX (codigo)
 );
 
 -- ============================================================
--- 6. SUPERVISOR ↔ SEDE
--- Un supervisor puede gestionar una o varias sedes
+-- 6. HORARIOS
 -- ============================================================
-CREATE TABLE usuario_sede (
-    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    usuario_id  INT UNSIGNED NOT NULL,
-    sede_id     INT UNSIGNED NOT NULL,
-    activo      TINYINT(1)   NOT NULL DEFAULT 1,
 
-    UNIQUE KEY uq_usuario_sede (usuario_id, sede_id),
-    CONSTRAINT fk_us_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
-    CONSTRAINT fk_us_sede    FOREIGN KEY (sede_id)    REFERENCES sedes(id)    ON DELETE CASCADE
-);
-
--- ============================================================
--- 7. HORARIOS DE SEDE
--- ============================================================
 CREATE TABLE horarios_sede (
-    id                          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    sede_id                     INT UNSIGNED NOT NULL,
-    nombre_turno                VARCHAR(50)  NOT NULL,
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    sede_id INT UNSIGNED NOT NULL,
+    nombre VARCHAR(50),
+    hora_entrada TIME NOT NULL,
+    hora_salida TIME NOT NULL,
+    tolerancia_entrada INT DEFAULT 0,
+    tolerancia_salida INT DEFAULT 0,
+    activo BOOLEAN DEFAULT TRUE,
 
-    hora_entrada                TIME NOT NULL,
-    hora_salida                 TIME NOT NULL,
-
-    tolerancia_entrada_minutos  INT NOT NULL DEFAULT 0,
-    tolerancia_salida_minutos   INT NOT NULL DEFAULT 0,
-
-    activo                      TINYINT(1) NOT NULL DEFAULT 1,
-
-    CONSTRAINT fk_hs_sede FOREIGN KEY (sede_id) REFERENCES sedes(id) ON DELETE CASCADE,
-
-    INDEX idx_hs_sede (sede_id)
+    FOREIGN KEY (sede_id) REFERENCES sedes(id)
 );
 
 -- ============================================================
--- 8. HORARIO ↔ DÍAS
+-- MEJORA 5: horario_id como INT UNSIGNED
+-- Antes: horario_dias.horario_id era INT (sin UNSIGNED)
+--        pero horarios_sede.id es INT UNSIGNED.
+--        Tipos distintos impiden usar índices eficientemente.
+-- Ahora: ambos son INT UNSIGNED, tipos consistentes.
 -- ============================================================
+
 CREATE TABLE horario_dias (
-    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    horario_sede_id INT UNSIGNED NOT NULL,
-    dia             ENUM('L','M','X','J','V','S','D') NOT NULL,
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    horario_id INT UNSIGNED NOT NULL,
+    dia TINYINT NOT NULL, -- 1=Lunes ... 7=Domingo
 
-    UNIQUE KEY uq_horario_dia (horario_sede_id, dia),
-    CONSTRAINT fk_hd_horario FOREIGN KEY (horario_sede_id) REFERENCES horarios_sede(id) ON DELETE CASCADE
+    FOREIGN KEY (horario_id) REFERENCES horarios_sede(id),
+    INDEX (horario_id, dia)
 );
 
 -- ============================================================
--- 9. EMPLEADO ↔ SEDE ↔ TURNO ↔ DEPARTAMENTO
+-- 7. ASIGNACION USUARIO-SEDE-HORARIO
+-- MEJORA 2: fecha_inicio / fecha_fin
+-- Antes: solo había estado BOOLEAN, sin historial de cuándo
+--        estuvo el trabajador en cada sede. Un traslado borraba
+--        el dato histórico rompiendo reportes del pasado.
+-- Ahora: fecha_inicio obligatorio, fecha_fin NULL = vigente.
 -- ============================================================
-CREATE TABLE usuario_app_sede (
-    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    usuario_id      INT UNSIGNED NOT NULL,
-    sede_id         INT UNSIGNED NOT NULL,
-    horario_sede_id INT UNSIGNED NOT NULL,
-    departamento_id INT UNSIGNED NULL,
-    estado          ENUM('ACTIVO','INACTIVO') NOT NULL DEFAULT 'ACTIVO',
 
-    -- un empleado solo puede tener UN turno por sede
-    UNIQUE KEY uq_usuario_sede (usuario_id, sede_id),
+CREATE TABLE usuario_sede (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    usuario_id INT UNSIGNED NOT NULL,
+    sede_id INT UNSIGNED NOT NULL,
+    horario_id INT UNSIGNED NOT NULL,
+    fecha_inicio DATE NOT NULL,
+    fecha_fin DATE NULL, -- NULL = asignación actualmente vigente
+    estado BOOLEAN DEFAULT TRUE,
 
-    CONSTRAINT fk_uas_usuario      FOREIGN KEY (usuario_id)      REFERENCES usuarios(id)      ON DELETE CASCADE,
-    CONSTRAINT fk_uas_sede         FOREIGN KEY (sede_id)         REFERENCES sedes(id)         ON DELETE CASCADE,
-    CONSTRAINT fk_uas_horario      FOREIGN KEY (horario_sede_id) REFERENCES horarios_sede(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_uas_departamento FOREIGN KEY (departamento_id) REFERENCES departamentos(id) ON DELETE SET NULL
+    UNIQUE(usuario_id, sede_id, horario_id, fecha_inicio),
+
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+    FOREIGN KEY (sede_id) REFERENCES sedes(id) ON DELETE RESTRICT,
+    FOREIGN KEY (horario_id) REFERENCES horarios_sede(id) ON DELETE RESTRICT,
+
+    INDEX (usuario_id, fecha_inicio, fecha_fin)
 );
 
--- ============================================================
--- 10. FERIADOS
--- sede_id NULL = feriado nacional (aplica a todas las sedes)
--- sede_id con valor = feriado solo para esa sede
--- ============================================================
-CREATE TABLE feriados (
-    id       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    fecha    DATE         NOT NULL,
-    nombre   VARCHAR(200) NOT NULL,
-    tipo     ENUM('NACIONAL','LOCAL','EMPRESA') NOT NULL DEFAULT 'NACIONAL',
-    -- NACIONAL: aplica a todas las sedes (sede_id NULL)
-    -- LOCAL / EMPRESA: solo para la sede indicada
-    sede_id  INT UNSIGNED NULL,
-    activo   TINYINT(1)   NOT NULL DEFAULT 1,
 
-    UNIQUE KEY uq_feriado (fecha, sede_id),
-    CONSTRAINT fk_fer_sede FOREIGN KEY (sede_id) REFERENCES sedes(id) ON DELETE CASCADE,
-
-    INDEX idx_feriados_sede_fecha (sede_id, fecha),
-    INDEX idx_feriados_tipo       (tipo)
+CREATE TABLE estados_asistencia (
+    id TINYINT PRIMARY KEY,
+    nombre VARCHAR(50) UNIQUE
 );
 
--- ============================================================
--- 11. ASISTENCIAS (RESUMEN DIARIO)
--- Un registro por empleado por día por turno
--- ============================================================
+INSERT INTO estados_asistencia VALUES
+(1,'PENDIENTE'), (2,'PRESENTE'), (3,'TARDANZA'),
+(4,'FALTA'), (5,'JUSTIFICADO');
+
 CREATE TABLE asistencias (
-    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    usuario_id      INT UNSIGNED NOT NULL,
-    sede_id         INT UNSIGNED NOT NULL,
-    horario_sede_id INT UNSIGNED NOT NULL,
-    fecha           DATE         NOT NULL,
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    usuario_sede_id INT UNSIGNED NOT NULL,
+    fecha DATE NOT NULL,
+    estado_id TINYINT NOT NULL,
+    minutos_tarde INT DEFAULT 0,
+    modified_by INT UNSIGNED NULL,
+    modified_at TIMESTAMP NULL,
 
-    hora_entrada    TIME NULL,
-    hora_salida     TIME NULL,
-    minutos_tarde   INT  NOT NULL DEFAULT 0,
+    UNIQUE(usuario_sede_id, fecha),
 
-    minutos_trabajados INT NULL,
+    FOREIGN KEY (usuario_sede_id) REFERENCES usuario_sede(id) ON DELETE CASCADE,
+    FOREIGN KEY (estado_id) REFERENCES estados_asistencia(id),
+    FOREIGN KEY (modified_by) REFERENCES usuarios(id) ON DELETE SET NULL,
 
-    estado_diario   ENUM('PENDIENTE','PRESENTE','TARDANZA','FALTA','JUSTIFICADO','FERIADO')
-                    NOT NULL DEFAULT 'PENDIENTE',
-
-    observacion     TEXT NULL,
-
-    revisado_por    INT UNSIGNED NULL,
-    revisado_en     DATETIME NULL,
-
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    UNIQUE KEY uq_asistencia (usuario_id, sede_id, fecha, horario_sede_id),
-
-    CONSTRAINT fk_asis_usuario  FOREIGN KEY (usuario_id)      REFERENCES usuarios(id)      ON DELETE CASCADE,
-    CONSTRAINT fk_asis_sede     FOREIGN KEY (sede_id)         REFERENCES sedes(id)         ON DELETE CASCADE,
-    CONSTRAINT fk_asis_horario  FOREIGN KEY (horario_sede_id) REFERENCES horarios_sede(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_asis_revisor  FOREIGN KEY (revisado_por)    REFERENCES usuarios(id)      ON DELETE SET NULL,
-
-    INDEX idx_asis_usuario_fecha  (usuario_id, fecha),
-    INDEX idx_asis_sede_fecha     (sede_id, fecha),
-    INDEX idx_asis_estado         (estado_diario)
+    INDEX (fecha),
+    INDEX (usuario_sede_id, fecha),
+    INDEX (estado_id, fecha)
 );
 
 -- ============================================================
--- 12. MARCACIONES (DETALLE DE CADA FICHAJE)
+-- MEJORA 4 (continuación): historial completo de cambios
 -- ============================================================
-CREATE TABLE asistencias_diarias (
-    id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    asistencia_id       INT UNSIGNED NOT NULL,
 
-    tipo                ENUM('ENTRADA','SALIDA','SALIDA_ALMUERZO','RETORNO_ALMUERZO') NOT NULL,
-    marcada_en          DATETIME     NOT NULL,
+CREATE TABLE asistencias_log (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    asistencia_id INT UNSIGNED NOT NULL,
+    estado_anterior_id TINYINT NOT NULL,
+    estado_nuevo_id TINYINT NOT NULL,
+    modified_by INT UNSIGNED NOT NULL,
+    modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    observacion VARCHAR(500) NULL,
 
-    latitud             DECIMAL(10,8) NULL,
-    longitud            DECIMAL(11,8) NULL,
-    distancia_metros    INT           NULL,
+    FOREIGN KEY (asistencia_id) REFERENCES asistencias(id) ON DELETE CASCADE,
+    FOREIGN KEY (estado_anterior_id) REFERENCES estados_asistencia(id),
+    FOREIGN KEY (estado_nuevo_id) REFERENCES estados_asistencia(id),
+    FOREIGN KEY (modified_by) REFERENCES usuarios(id),
 
-    -- VALIDA: dentro del radio | OBSERVADA: fuera del radio pero aceptada
-    estado_marcacion    ENUM('VALIDA','OBSERVADA') NOT NULL DEFAULT 'VALIDA',
-    motivo_observacion  VARCHAR(200) NULL,   -- razón cuando estado_marcacion = 'OBSERVADA'
+    INDEX (asistencia_id),
+    INDEX (modified_by),
+    INDEX (modified_at)
+);
 
-    -- para marcaciones que requieren revisión manual
-    estado_revision     ENUM('PENDIENTE','APROBADA','RECHAZADA') NOT NULL DEFAULT 'APROBADA',
 
-    offline_uuid        VARCHAR(100) NULL UNIQUE,
-    registrado_en       ENUM('APP_ONLINE','APP_OFFLINE') NOT NULL DEFAULT 'APP_ONLINE',
+CREATE TABLE tipos_marcacion (
+    id TINYINT PRIMARY KEY,
+    nombre VARCHAR(20) UNIQUE
+);
 
-    revisado_por        INT UNSIGNED NULL,
+INSERT INTO tipos_marcacion VALUES
+(1,'ENTRADA'), (2,'SALIDA');
 
-    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE marcaciones (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    asistencia_id INT UNSIGNED NOT NULL,
+    tipo_id TINYINT NOT NULL,
+    fecha_hora DATETIME NOT NULL,
+    latitud DECIMAL(10,8),
+    longitud DECIMAL(11,8),
+    distancia INT,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    observacion VARCHAR(255),
 
-    CONSTRAINT fk_ad_asistencia FOREIGN KEY (asistencia_id) REFERENCES asistencias(id) ON DELETE CASCADE,
-    CONSTRAINT fk_ad_revisor    FOREIGN KEY (revisado_por)  REFERENCES usuarios(id)    ON DELETE SET NULL,
+    -- Solo puede haber una marcación por tipo en cada segundo de la asistencia
+    UNIQUE(asistencia_id, tipo_id, fecha_hora),
 
-    INDEX idx_ad_asistencia_fecha (asistencia_id, marcada_en),
-    INDEX idx_ad_estado_revision  (estado_revision)
+    FOREIGN KEY (asistencia_id) REFERENCES asistencias(id) ON DELETE CASCADE,
+    FOREIGN KEY (tipo_id) REFERENCES tipos_marcacion(id),
+
+    INDEX (asistencia_id, tipo_id),
+    INDEX (fecha_hora)
 );
 
 -- ============================================================
--- 13. TIPOS DE AUSENCIA (CATÁLOGO)
+-- 10. JUSTIFICACIONES
+-- MEJORA 1 (aplicada): estado_id → estados_justificacion
 -- ============================================================
-CREATE TABLE tipos_ausencia (
-    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    codigo          VARCHAR(50)  NOT NULL UNIQUE,
-    nombre          VARCHAR(150) NOT NULL,
-    requiere_doc    TINYINT(1)   NOT NULL DEFAULT 0,  -- ¿exige documento adjunto?
-    descuenta_dias  TINYINT(1)   NOT NULL DEFAULT 1,  -- ¿afecta bolsa de días?
-    activo          TINYINT(1)   NOT NULL DEFAULT 1
-);
 
-INSERT INTO tipos_ausencia (codigo, nombre, requiere_doc, descuenta_dias) VALUES
-('VACACIONES',       'Vacaciones',              0, 1),
-('ENFERMEDAD',       'Descanso médico',         1, 0),
-('PERMISO_PERSONAL', 'Permiso personal',        0, 1),
-('COMISION',         'Comisión de servicio',    1, 0),
-('LICENCIA',         'Licencia sin goce',       1, 1),
-('CAPACITACION',     'Capacitación',            0, 0),
-('DUELO',            'Licencia por duelo',      1, 0),
-('MATERNIDAD',       'Licencia por maternidad', 1, 0),
-('PATERNIDAD',       'Licencia por paternidad', 1, 0);
-
--- ============================================================
--- 14. SOLICITUDES DE AUSENCIA (PROACTIVO — ANTES DEL HECHO)
--- El empleado pide permiso/vacaciones con anticipación
--- ============================================================
-CREATE TABLE solicitudes_ausencia (
-    id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    usuario_id          INT UNSIGNED NOT NULL,
-    tipo_ausencia_id    INT UNSIGNED NOT NULL,
-
-    fecha_inicio        DATE NOT NULL,
-    fecha_fin           DATE NOT NULL,
-
-    motivo              TEXT         NULL,
-    archivo_adjunto     VARCHAR(500) NULL,
-
-    estado              ENUM('PENDIENTE','APROBADO','RECHAZADO') NOT NULL DEFAULT 'PENDIENTE',
-
-    revisado_por        INT UNSIGNED NULL,
-    revisado_en         DATETIME     NULL,
-    comentario_revision TEXT         NULL,
-
-    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_sa_usuario  FOREIGN KEY (usuario_id)       REFERENCES usuarios(id)      ON DELETE CASCADE,
-    CONSTRAINT fk_sa_tipo     FOREIGN KEY (tipo_ausencia_id) REFERENCES tipos_ausencia(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_sa_revisor  FOREIGN KEY (revisado_por)     REFERENCES usuarios(id)      ON DELETE SET NULL,
-
-    INDEX idx_sa_usuario_fecha (usuario_id, fecha_inicio, fecha_fin),
-    INDEX idx_sa_estado        (estado)
-);
-
--- ============================================================
--- 15. JUSTIFICACIONES (REACTIVO — DESPUÉS DEL HECHO)
--- El empleado explica una falta ya ocurrida
--- ============================================================
 CREATE TABLE justificaciones (
-    id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    usuario_id          INT UNSIGNED NOT NULL,
-    asistencia_id       INT UNSIGNED NOT NULL,
-    tipo_ausencia_id    INT UNSIGNED NOT NULL,
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    usuario_id INT UNSIGNED NOT NULL,
+    asistencia_id INT UNSIGNED NULL,
+    fecha_inicio DATE NOT NULL,
+    fecha_fin DATE NOT NULL,
+    motivo TEXT,
+    estado_id TINYINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    fecha_inicio        DATE NOT NULL,
-    fecha_fin           DATE NOT NULL,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+    FOREIGN KEY (asistencia_id) REFERENCES asistencias(id),
+    FOREIGN KEY (estado_id) REFERENCES estados_justificacion(id),
 
-    motivo              TEXT         NULL,
-    archivo_adjunto     VARCHAR(500) NULL,
-
-    estado              ENUM('PENDIENTE','APROBADO','RECHAZADO') NOT NULL DEFAULT 'PENDIENTE',
-
-    revisado_por        INT UNSIGNED NULL,
-    revisado_en         DATETIME     NULL,
-    comentario_revision TEXT         NULL,
-
-    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_just_usuario     FOREIGN KEY (usuario_id)       REFERENCES usuarios(id)      ON DELETE CASCADE,
-    CONSTRAINT fk_just_asistencia  FOREIGN KEY (asistencia_id)    REFERENCES asistencias(id)   ON DELETE CASCADE,
-    CONSTRAINT fk_just_tipo        FOREIGN KEY (tipo_ausencia_id) REFERENCES tipos_ausencia(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_just_revisor     FOREIGN KEY (revisado_por)     REFERENCES usuarios(id)      ON DELETE SET NULL,
-
-    INDEX idx_just_usuario (usuario_id),
-    INDEX idx_just_estado  (estado)
+    INDEX (usuario_id),
+    INDEX (estado_id),
+    INDEX (fecha_inicio, fecha_fin)
 );
 
 -- ============================================================
--- 16. TOKENS DE SESIÓN
+-- 11. TOKENS
 -- ============================================================
-CREATE TABLE tokens_sesion (
-    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    usuario_id  INT UNSIGNED NOT NULL,
-    token       VARCHAR(500) NOT NULL UNIQUE,
-    expires_at  DATETIME     NOT NULL,
-    revocado    TINYINT(1)   NOT NULL DEFAULT 0,
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT fk_tok_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+CREATE TABLE tokens_web (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    usuario_id INT UNSIGNED NOT NULL,
+    token VARCHAR(500) UNIQUE,
+    expires_at DATETIME,
 
-    INDEX idx_token_activo (usuario_id, revocado, expires_at)
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+    INDEX (usuario_id)
+);
+
+CREATE TABLE tokens_app (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    usuario_id INT UNSIGNED NOT NULL,
+    token VARCHAR(500) UNIQUE,
+    expires_at DATETIME,
+
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+    INDEX (usuario_id)
 );
 
 -- ============================================================
--- 17. AUDITORÍA
--- Registra cualquier cambio sensible: quién, qué, cuándo, desde dónde
+-- 12. RATE LIMITING
 -- ============================================================
-CREATE TABLE auditoria (
-    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,  -- BIGINT: crece rápido
-    usuario_id      INT UNSIGNED NULL,     -- NULL si fue el sistema (cron, trigger)
-    tabla           VARCHAR(100) NOT NULL,
-    registro_id     INT UNSIGNED NOT NULL,
-    accion          ENUM('INSERT','UPDATE','DELETE') NOT NULL,
-    campo           VARCHAR(100) NULL,     -- columna modificada (solo en UPDATE)
-    valor_anterior  TEXT NULL,
-    valor_nuevo     TEXT NULL,
-    ip              VARCHAR(45)  NULL,     -- soporta IPv4 e IPv6
-    user_agent      VARCHAR(500) NULL,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT fk_audit_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL,
-
-    INDEX idx_audit_tabla_registro (tabla, registro_id),
-    INDEX idx_audit_usuario        (usuario_id)
-);
-
--- ============================================================
--- 18. INTENTOS DE LOGIN (RATE LIMITING)
--- ============================================================
 CREATE TABLE login_attempts (
-    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    ip              VARCHAR(45)  NOT NULL,  -- soporta IPv4 e IPv6
-    endpoint        VARCHAR(100) NOT NULL,
-    intentos        INT          NOT NULL DEFAULT 1,
-    ultimo_intento  DATETIME     NOT NULL,
-    bloqueado_hasta DATETIME     NULL,
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ip VARCHAR(45),
+    endpoint VARCHAR(50),
+    intentos INT DEFAULT 1,
+    ultimo_intento DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    bloqueado_hasta DATETIME,
 
-    INDEX idx_login_ip_endpoint (ip, endpoint),
-    INDEX idx_login_bloqueado   (bloqueado_hasta)
+    INDEX (ip, endpoint)
 );
+
+CREATE TABLE password_resets_app (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    usuario_id INT UNSIGNED NOT NULL,
+    estado ENUM('PENDIENTE', 'APROBADA', 'RECHAZADA') DEFAULT 'PENDIENTE',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+    INDEX (usuario_id),
+    INDEX (estado)
+);
+
+CREATE TABLE departamentos (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(150) UNIQUE NOT NULL,
+    descripcion VARCHAR(500) NULL,
+    activo TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+INSERT INTO departamentos (nombre, descripcion) VALUES
+('Recursos Humanos', 'Área de gestión de personal'),
+('Tecnología de Información', 'Soporte y desarrollo de sistemas'),
+('Operaciones', 'Área operativa y logística');
 
 SET FOREIGN_KEY_CHECKS = 1;
 
--- ============================================================
--- RESUMEN DE TABLAS
--- ============================================================
--- 01. usuarios              → todos los usuarios del sistema
--- 02. roles                 → ADMIN, SUPERVISOR, EMPLEADO
--- 03. usuario_roles         → relación usuario ↔ rol (N:M)
--- 04. departamentos         → áreas de la empresa
--- 05. sedes                 → ubicaciones físicas con GPS
--- 06. usuario_sede          → supervisor ↔ sede (N:M)
--- 07. horarios_sede         → turnos con entrada/salida/almuerzo
--- 08. horario_dias          → días laborables por turno
--- 09. usuario_app_sede      → empleado ↔ sede ↔ turno ↔ departamento
--- 10. feriados              → nacionales (sede NULL) o por sede
--- 11. asistencias           → resumen diario por empleado
--- 12. asistencias_diarias   → marcaciones individuales (entrada/salida/almuerzo)
--- 13. tipos_ausencia        → catálogo: vacaciones, enfermedad, permiso, etc.
--- 14. solicitudes_ausencia  → permisos pedidos ANTES (proactivo)
--- 15. justificaciones       → explicaciones de faltas DESPUÉS (reactivo)
--- 16. tokens_sesion         → manejo de sesiones JWT
--- 17. auditoria             → trazabilidad completa de cambios

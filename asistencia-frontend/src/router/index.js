@@ -69,17 +69,23 @@ const router = createRouter({
           meta: { roles: ['administrador', 'supervisor'] }
         },
         {
+          path: 'departamentos',
+          name: 'departamentos',
+          component: () => import('@/views/admin/DepartamentosView.vue'),
+          meta: { roles: ['administrador', 'supervisor'] }
+        },
+        {
           path: 'solicitudes-ausencia',
           name: 'solicitudes-ausencia',
           component: () => import('@/views/operaciones/SolicitudesAusenciaView.vue'),
           meta: { roles: ['administrador', 'supervisor'] }
         },
         {
-          path: 'departamentos',
-          name: 'departamentos',
-          component: () => import('@/views/admin/DepartamentosView.vue'),
+          path: 'reportes',
+          name: 'reportes',
+          component: () => import('@/views/operaciones/ReportesView.vue'),
           meta: { roles: ['administrador', 'supervisor'] }
-        }
+        },
       ]
     }
   ]

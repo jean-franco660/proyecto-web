@@ -4,10 +4,21 @@ namespace App\Controllers\Web;
 use App\Core\Request;
 use App\Core\Response;
 use App\Models\HorarioSede;
-use App\Core\Database;
 
+/**
+ * HorarioWebController — Gestión de horarios de sede.
+ * Delegando consultas SQL inline al modelo HorarioSede.
+ */
 class HorarioWebController extends BaseWebController
 {
+    private HorarioSede $model;
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->model = new HorarioSede();
+    }
+
     /**
      * GET /v1/web/horarios?sede_id=2
      * Supervisor solo ve horarios de sus sedes.
@@ -18,122 +29,116 @@ class HorarioWebController extends BaseWebController
         $rol    = $_REQUEST['auth_user']['rol'] ?? '';
         $userId = (int) ($_REQUEST['auth_user']['sub'] ?? 0);
 
-        $sql    = 'SELECT * FROM horarios_sede WHERE 1=1';
-        $params = [];
-
-        if ($sedeId) {
-            $sql .= ' AND sede_id = :sid';
-            $params[':sid'] = $sedeId;
-        } elseif ($rol === 'supervisor') {
-            $sql .= ' AND sede_id IN (
-                SELECT sede_id FROM usuario_web_sede
-                WHERE usuario_web_id = :uid AND activo = 1
-            )';
-            $params[':uid'] = $userId;
-        }
-
-        $sql .= ' ORDER BY hora_entrada';
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
-        Response::success($stmt->fetchAll());
+        Response::success($this->model->listarConFiltros($sedeId, $rol, $userId));
     }
 
     /**
      * POST /v1/web/horarios
-     * Al crear, asigna automáticamente el horario a trabajadores de esa sede que aún no tienen horario asignado.
+     * Al crear, inserta los días en horario_dias.
      */
     public function store(Request $req): void
     {
-        $data = $req->only([
-            'sede_id','nombre_turno','hora_entrada','hora_salida',
-            'tolerancia_entrada_minutos','tolerancia_salida_minutos','dias_semana'
-        ]);
+        $sedeId   = (int) $req->input('sede_id');
+        $nombre   = (string) $req->input('nombre');
+        $hEntrada = (string) $req->input('hora_entrada');
+        $hSalida  = (string) $req->input('hora_salida');
+        $tolEnt   = (int) ($req->input('tolerancia_entrada') ?? 0);
+        $tolSal   = (int) ($req->input('tolerancia_salida') ?? 0);
+        $dias     = $req->input('dias_semana', []);
 
         $errors = [];
-        if (empty($data['sede_id']))         $errors[] = 'sede_id es requerido';
-        if (empty($data['nombre_turno']))    $errors[] = 'nombre_turno es requerido';
-        if (empty($data['hora_entrada']))    $errors[] = 'hora_entrada es requerido';
-        if (empty($data['hora_salida']))     $errors[] = 'hora_salida es requerido';
-        if (empty($data['dias_semana']))     $errors[] = 'dias_semana es requerido';
+        if (!$sedeId)    $errors[] = 'sede_id es requerido';
+        if (!$nombre)    $errors[] = 'nombre es requerido';
+        if (!$hEntrada)  $errors[] = 'hora_entrada es requerido';
+        if (!$hSalida)   $errors[] = 'hora_salida es requerido';
+        if (empty($dias) || !is_array($dias)) $errors[] = 'dias_semana es requerido';
         if ($errors) Response::unprocessable('Datos incompletos', $errors);
 
-        $data['dias_semana'] = json_encode($data['dias_semana']);
-        $data['activo']      = 1;
-        $data['tolerancia_entrada_minutos'] = (int)($data['tolerancia_entrada_minutos'] ?? 0);
-        $data['tolerancia_salida_minutos']  = (int)($data['tolerancia_salida_minutos'] ?? 0);
+        try {
+            $horarioId = $this->model->crearHorario([
+                'sede_id' => $sedeId,
+                'nombre' => $nombre,
+                'hora_entrada' => $hEntrada,
+                'hora_salida' => $hSalida,
+                'tolerancia_entrada' => $tolEnt,
+                'tolerancia_salida' => $tolSal,
+            ], $dias);
 
-        $stmt = $this->db->prepare("
-            INSERT INTO horarios_sede
-                (sede_id, nombre_turno, hora_entrada, hora_salida,
-                 tolerancia_entrada_minutos, tolerancia_salida_minutos, dias_semana, activo)
-            VALUES (:sid, :nt, :he, :hs, :te, :ts, :ds, 1)
-        ");
-        $stmt->execute([
-            ':sid' => $data['sede_id'],
-            ':nt'  => $data['nombre_turno'],
-            ':he'  => $data['hora_entrada'],
-            ':hs'  => $data['hora_salida'],
-            ':te'  => $data['tolerancia_entrada_minutos'],
-            ':ts'  => $data['tolerancia_salida_minutos'],
-            ':ds'  => $data['dias_semana'],
-        ]);
-        $horarioId = (int) $this->db->lastInsertId();
+            $result = $this->model->find($horarioId);
+            $result['dias_semana'] = array_map('intval', $dias);
 
-        // Auto-asignar a trabajadores sin horario en esa sede
-        $this->autoAsignarHorario((int)$data['sede_id'], $horarioId);
-
-        $stmt = $this->db->prepare("SELECT * FROM horarios_sede WHERE id = :id");
-        $stmt->execute([':id' => $horarioId]);
-        Response::success($stmt->fetch(), 'Horario creado correctamente', 201);
-    }
-
-    /**
-     * Auto-asigna el horario a trabajadores sin horario en esa sede.
-     * Misma lógica que el HorariosInstitucionController de Laravel.
-     */
-    private function autoAsignarHorario(int $sedeId, int $horarioId): void
-    {
-        $stmt = $this->db->prepare("
-            UPDATE usuario_app_sede
-            SET horario_sede_id = :hid
-            WHERE sede_id = :sid
-              AND estado = 'ACTIVO'
-              AND horario_sede_id IS NULL
-        ");
-        $stmt->execute([':hid' => $horarioId, ':sid' => $sedeId]);
+            Response::success($result, 'Horario creado correctamente', 201);
+        } catch (\Exception $e) {
+            error_log('[HorarioWebController::store] Error: ' . $e->getMessage());
+            Response::error('Error al crear el horario. Intente nuevamente.', 500);
+        }
     }
 
     public function update(Request $req): void
     {
-        $id  = (int) $req->param('id');
-        $data = $req->only([
-            'nombre_turno','hora_entrada','hora_salida',
-            'tolerancia_entrada_minutos','tolerancia_salida_minutos',
-            'dias_semana','activo'
-        ]);
+        $id = (int) $req->param('id');
 
-        if (isset($data['dias_semana']) && is_array($data['dias_semana']))
-            $data['dias_semana'] = json_encode($data['dias_semana']);
+        $data = [];
+        $nombre   = $req->input('nombre');
+        $hEntrada = $req->input('hora_entrada');
+        $hSalida  = $req->input('hora_salida');
+        $tolEnt   = $req->input('tolerancia_entrada');
+        $tolSal   = $req->input('tolerancia_salida');
+        $activo   = $req->input('activo');
 
-        // FIX Bug #9: los nombres de columna no tenían backticks en el SET dinámico.
-        // Sin backticks, columnas con nombres reservados en MySQL fallarían.
-        $sets   = implode(', ', array_map(fn($k) => "`{$k}` = :{$k}", array_keys($data)));
-        $data['id'] = $id;
+        if ($nombre !== null)   $data['nombre'] = $nombre;
+        if ($hEntrada !== null) $data['hora_entrada'] = $hEntrada;
+        if ($hSalida !== null)  $data['hora_salida'] = $hSalida;
+        if ($tolEnt !== null)   $data['tolerancia_entrada'] = (int) $tolEnt;
+        if ($tolSal !== null)   $data['tolerancia_salida'] = (int) $tolSal;
+        if ($activo !== null)   $data['activo'] = (int) $activo;
 
-        $stmt = $this->db->prepare("UPDATE horarios_sede SET $sets WHERE id = :id");
-        $stmt->execute($data);
+        $dias = $req->input('dias_semana');
 
-        $stmt = $this->db->prepare("SELECT * FROM horarios_sede WHERE id = :id");
-        $stmt->execute([':id' => $id]);
-        Response::success($stmt->fetch(), 'Horario actualizado correctamente');
+        try {
+            $this->model->actualizarHorario($id, $data, is_array($dias) ? $dias : null);
+        } catch (\Exception $e) {
+            error_log('[HorarioWebController::update] Error: ' . $e->getMessage());
+            Response::error('Error al actualizar el horario. Intente nuevamente.', 500);
+        }
+
+        $result = $this->model->find($id);
+        $result['dias_semana'] = array_map('intval', array_column($this->model->diasPorHorario($id), 'dia'));
+
+        Response::success($result, 'Horario actualizado correctamente');
+    }
+
+    /** PUT /v1/web/horarios/{id}/dias — sync días del horario */
+    public function syncDias(Request $req): void
+    {
+        $id   = (int) $req->param('id');
+        $dias = $req->input('dias', []);
+
+        if (!is_array($dias)) Response::unprocessable('dias debe ser un array');
+
+        try {
+            $this->model->sincronizarDias($id, $dias);
+        } catch (\Exception $e) {
+            error_log('[HorarioWebController::syncDias] Error: ' . $e->getMessage());
+            Response::error('Error al sincronizar días. Intente nuevamente.', 500);
+        }
+
+        Response::success(null, 'Días actualizados correctamente');
     }
 
     /** DELETE /v1/web/horarios/{id} */
     public function destroy(Request $req): void
     {
         $id = (int) $req->param('id');
-        $stmt = $this->db->prepare("DELETE FROM horarios_sede WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        try {
+            $this->model->eliminarHorario($id);
+        } catch (\PDOException $e) {
+            if ($e->getCode() === '23000') {
+                Response::error('No se puede eliminar: hay trabajadores asignados a este horario', 409);
+            }
+            error_log('[HorarioWebController::destroy] Error: ' . $e->getMessage());
+            Response::error('Error al eliminar el horario', 500);
+        }
         Response::success(null, 'Horario eliminado correctamente');
     }
 }
